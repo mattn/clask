@@ -7,6 +7,8 @@ Very Very Experimental Web micro-framework like flask in C++.
 ## Usage
 
 ```cpp
+#include "clask/core.hpp"
+
 int main() {
   auto s = clask::server();
   s.GET("/", [](clask::request& req) {
