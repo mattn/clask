@@ -22,6 +22,11 @@ int main() {
 }
 ```
 
+## TODO
+
+* Unescape paths in request
+* Unescape query parameters in request
+
 ## License
 
 MIT
