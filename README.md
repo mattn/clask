@@ -34,6 +34,10 @@ int main() {
 
 MIT
 
+This product contains following third-party libraries:
+
+* picohttpparser written by kazuho
+
 ## Author
 
 Yasuhiro Matsumoto (a.k.a. mattn)
