@@ -47,13 +47,13 @@ class logger {
 protected:
   std::ostringstream os;
   log_level lv;
-  static log_level default_level;
 
 private:
   logger(const logger&);
   logger& operator =(const logger&);
 
 public:
+  static log_level default_level;
   logger() {};
   virtual ~logger();
   std::ostringstream& get(log_level level = INFO);
@@ -200,7 +200,6 @@ class server_t {
 private:
   std::vector<std::pair<std::string, functor>> handlers;
   std::vector<std::pair<std::string, functor_string>> handlers_string;
-  logger log;
 
 public:
   void GET(std::string path, functor fn);
@@ -208,6 +207,7 @@ public:
   void GET(std::string path, functor_string fn);
   void POST(std::string path, functor_string fn);
   void run();
+  logger log;
 };
 
 void server_t::GET(std::string path, functor fn) {

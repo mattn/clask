@@ -2,6 +2,7 @@
 
 int main() {
   auto s = clask::server();
+  s.log.default_level = clask::INFO;
   s.GET("/", [](clask::request& req) {
     return "OK!";
   });
