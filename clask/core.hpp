@@ -89,7 +89,7 @@ private:
   bool header_out;
   int s;
 public:
-  response(int s) : s(s) { }
+  response(int s) : s(s), header_out(false) { }
   void set_header(std::string, std::string);
   void write(std::string);
 };
