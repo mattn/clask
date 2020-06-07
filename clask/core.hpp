@@ -6,7 +6,10 @@
 #include <map>
 #include <exception>
 #include <sstream>
+#include <iomanip>
+
 #include <cstdio>
+#include <ctime>
 
 #ifdef _WIN32
 # include <ws2tcpip.h>
@@ -34,8 +37,49 @@ socket_perror(const char *s) {
 #endif
 
 #include "picohttpparser.h"
+#include "picohttpparser.c"
 
 namespace clask {
+
+enum log_level {ERR, WARN, INFO, DEBUG};
+
+class logger {
+protected:
+  std::ostringstream os;
+  log_level lv;
+  static log_level default_level;
+
+private:
+  logger(const logger&);
+  logger& operator =(const logger&);
+
+public:
+  logger() {};
+  virtual ~logger();
+  std::ostringstream& get(log_level level = INFO);
+  static log_level& level();
+};
+
+std::ostringstream& logger::get(log_level level) {
+  auto t = std::time(nullptr);
+  auto tm = *std::localtime(&t);
+  os << std::put_time(&tm, "%Y/%m/%d %H:%M:%S ");
+  switch (level) {
+    case ERR: os << "ERR: "; break;
+    case WARN: os << "WARN: "; break;
+    case INFO: os << "INFO: "; break;
+    default: os << "DEBUG: "; break;
+  }
+  lv = level;
+  return os;
+}
+
+logger::~logger() {
+  if (lv >= logger::level()) {
+    os << std::endl;
+    std::cerr << os.str().c_str();
+  }
+}
 
 typedef std::pair<std::string, std::string> header;
 
@@ -89,8 +133,11 @@ typedef std::function<void(response&, request&)> functor;
 typedef std::function<std::string(request&)> functor_string;
 
 class server_t {
+private:
   std::vector<std::pair<std::string, functor>> handlers;
   std::vector<std::pair<std::string, functor_string>> handlers_string;
+  logger log;
+
 public:
   void GET(std::string path, functor fn);
   void POST(std::string path, functor fn);
@@ -206,6 +253,8 @@ void server_t::run() {
         std::move(std::string(headers[n].name, headers[n].name_len)),
         std::move(std::string(headers[n].value, headers[n].value_len)))));
 
+    logger().get(INFO) << req_method << " " << req_path;
+
     request req(
         req_method,
         req_path,
@@ -213,6 +262,7 @@ void server_t::run() {
         req_uri_params,
         req_headers,
         req_body);
+
     bool found = false;
     for (auto h : handlers_string) {
       if (h.first == req_path) {
@@ -244,4 +294,10 @@ void server_t::run() {
 
 auto server() { return server_t{}; }
 
+}
+
+clask::log_level clask::logger::default_level = clask::INFO;
+
+clask::log_level& clask::logger::level() {
+  return default_level;
 }

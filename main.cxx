@@ -1,4 +1,4 @@
-#include "clask.hpp"
+#include "clask/core.hpp"
 
 int main() {
   auto s = clask::server();
