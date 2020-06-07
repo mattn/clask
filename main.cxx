@@ -6,7 +6,7 @@ int main() {
     return "OK!";
   });
   s.GET("/notfound", [](clask::response& resp, clask::request& req) {
-    resp.set_status(404);
+    resp.code = 404;
     resp.set_header("content-type", "text/html");
     resp.write("Not Found");
   });

@@ -146,13 +146,12 @@ static std::map<int, std::string> status_codes = {
 
 class response {
 private:
-  int code;
   std::vector<header> headers;
   bool header_out;
   int s;
 public:
+  int code;
   response(int s, int code) : s(s), code(code), header_out(false) { }
-  void set_status(int);
   void set_header(std::string, std::string);
   void write(std::string);
 };
