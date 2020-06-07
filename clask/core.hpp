@@ -7,6 +7,7 @@
 #include <exception>
 #include <sstream>
 #include <iomanip>
+#include <algorithm>
 
 #include <cstdio>
 #include <ctime>
@@ -156,8 +157,29 @@ public:
   void write(std::string);
 };
 
+static std::string camelize(std::string s) {
+  int n = s.length();
+  int res_ind = 0;
+  for (auto i = 0; i < n; i++) {
+    if (s[i] == ' ' || s[i] == '-') {
+      s[i] = '-';
+      s[i + 1] = std::toupper(s[i + 1]);
+      continue;
+    }
+    s[res_ind++] = s[i];
+  }
+  return s.substr(0, res_ind);
+}
+
 void response::set_header(std::string key, std::string value) {
-  headers.push_back(std::make_pair(key, value));
+  auto h = camelize(key);
+  for (auto hh : headers) {
+    if (hh.first == h) {
+      hh.second = value;
+      return;
+    }
+  }
+  headers.push_back(std::make_pair(h, value));
 }
 
 void response::write(std::string content) {
@@ -227,39 +249,39 @@ void server_t::POST(std::string path, functor_string fn) {
 }
 
 void server_t::run() {
-  int server_fd, s; 
-  struct sockaddr_in address; 
+  int server_fd, s;
+  struct sockaddr_in address;
 #ifdef _WIN32
-  char opt = 1; 
+  char opt = 1;
 #else
-  int opt = 1; 
+  int opt = 1;
 #endif
-  int addrlen = sizeof(address); 
+  int addrlen = sizeof(address);
 
 #ifdef _WIN32
   WSADATA wsa;
   WSAStartup(MAKEWORD(2, 0), &wsa);
 #endif
 
-  if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) { 
+  if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
     throw std::runtime_error("socket failed");
-  } 
+  }
 
-  if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, (int) sizeof(opt))) { 
+  if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, (int) sizeof(opt))) {
     throw std::runtime_error("setsockopt");
-  } 
-  address.sin_family = AF_INET; 
-  address.sin_addr.s_addr = INADDR_ANY; 
-  address.sin_port = htons(8080); 
+  }
+  address.sin_family = AF_INET;
+  address.sin_addr.s_addr = INADDR_ANY;
+  address.sin_port = htons(8080);
 
-  if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) { 
+  if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
     throw std::runtime_error("bind failed");
-  } 
-  if (listen(server_fd, 0) < 0) { 
+  }
+  if (listen(server_fd, 0) < 0) {
     throw std::runtime_error("listen");
-  } 
+  }
   while (true) {
-    if ((s = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen))<0) { 
+    if ((s = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen))<0) {
       throw std::runtime_error("accept");
     }
     char buf[4096];
