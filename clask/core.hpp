@@ -164,7 +164,7 @@ void response::write(std::string content) {
   if (!header_out) {
     header_out = true;
     std::ostringstream os;
-    os << "HTTP/1.0 " << code << status_codes[code] << "\r\n";
+    os << "HTTP/1.0 " << code << " " << status_codes[code] << "\r\n";
     std::string res_headers = os.str();
     send(s, res_headers.data(), res_headers.size(), 0);
     for (auto h : headers) {
