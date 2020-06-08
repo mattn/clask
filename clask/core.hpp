@@ -365,12 +365,12 @@ void server_t::run() {
     logger().get(INFO) << req_method << " " << req_path;
 
     request req(
-        std::move(req_method),
-        std::move(req_path),
-        std::move(req_path),
-        std::move(req_uri_params),
-        std::move(req_headers),
-        std::move(req_body));
+        req_method,
+        req_path,
+        req_path,
+        req_uri_params,
+        req_headers,
+        req_body);
 
     // TODO
     // bloom filter to handle URL parameters
