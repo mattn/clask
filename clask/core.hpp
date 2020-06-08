@@ -350,6 +350,9 @@ void server_t::run() {
         req_body);
 
     bool found = false;
+    // TODO
+    // use unordered_map
+    // bloom filter to handle URL parameters
     for (auto h : handlers_string) {
       if (h.first == req_path) {
         found = true;
