@@ -9,6 +9,7 @@
 #include <sstream>
 #include <iomanip>
 #include <algorithm>
+#include <thread>
 
 #include <ctime>
 
@@ -272,7 +273,7 @@ void server_t::POST(std::string path, functor_response fn) {
 }
 
 void server_t::run() {
-  int server_fd, s;
+  int server_fd;
   struct sockaddr_in address;
 #ifdef _WIN32
   char opt = 1;
@@ -300,108 +301,115 @@ void server_t::run() {
   if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
     throw std::runtime_error("bind failed");
   }
-  if (listen(server_fd, 0) < 0) {
+  if (listen(server_fd, 5000) < 0) {
     throw std::runtime_error("listen");
   }
+
+  std::vector<std::thread> threads;
   while (true) {
+    int s;
     if ((s = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen))<0) {
       throw std::runtime_error("accept");
     }
-    char buf[4096];
-    const char *method, *path;
-    int pret, minor_version;
-    struct phr_header headers[100];
-    size_t buflen = 0, prevbuflen = 0, method_len, path_len, num_headers;
-    ssize_t rret;
 
-    while (1) {
-      while ((rret = recv(s, buf + buflen, sizeof(buf) - buflen, 0)) == -1 && errno == EINTR);
-      if (rret <= 0) {
-        // IOError
-        continue;
-      }
+    std::thread t([&]{
+      char buf[4096];
+      const char *method, *path;
+      int pret, minor_version;
+      struct phr_header headers[100];
+      size_t buflen = 0, prevbuflen = 0, method_len, path_len, num_headers;
+      ssize_t rret;
 
-      prevbuflen = buflen;
-      buflen += rret;
-      num_headers = sizeof(headers) / sizeof(headers[0]);
-      pret = phr_parse_request(
-          buf, buflen, &method, &method_len, &path, &path_len,
-          &minor_version, headers, &num_headers, prevbuflen);
-      if (pret > 0) {
-        break;
-      }
-      if (pret == -1) {
-        // ParseError
-        continue;
-      }
-      if (buflen == sizeof(buf)) {
-        // RequestIsTooLongError
-        continue;
-      }
-    }
-
-    std::string req_method(method, method_len);
-    std::string req_path(path, path_len);
-    std::string req_body(buf + pret, buflen - pret);
-
-    std::istringstream iss(req_path);
-    std::map<std::string, std::string> req_uri_params;
-    std::vector<header> req_headers;
-
-    if (std::getline(iss, req_path, '?')) {
-      std::string keyval, key, val;
-      while(std::getline(iss, keyval, '&')) {
-        std::istringstream isk(keyval);
-        // TODO unescape query strings
-        if(std::getline(std::getline(isk, key, '='), val))
-          req_uri_params[std::move(key)] = std::move(val);
-      }
-    }
-    for (auto n = 0; n < num_headers; n++)
-      req_headers.push_back(std::move(std::make_pair(
-        std::move(std::string(headers[n].name, headers[n].name_len)),
-        std::move(std::string(headers[n].value, headers[n].value_len)))));
-
-    logger().get(INFO) << req_method << " " << req_path;
-
-    request req(
-        req_method,
-        req_path,
-        req_path,
-        req_uri_params,
-        req_headers,
-        req_body);
-
-    // TODO
-    // bloom filter to handle URL parameters
-	auto it = handlers.find(req_method + " " + req_path);
-    if (it != handlers.end()) {
-      if (it->second.fs != nullptr) {
-        auto res = it->second.fs(req);
-        std::string res_headers = "HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\n\r\n";
-        send(s, res_headers.data(), res_headers.size(), 0);
-        send(s, res.data(), res.size(), 0);
-      } else if (it->second.fw != nullptr) {
-        response_writer writer(s, 200);
-        it->second.fw(writer, req);
-      } else if (it->second.fr != nullptr) {
-        auto res = it->second.fr(req);
-        std::ostringstream os;
-        os << "HTTP/1.0 " << res.code << " " << status_codes[res.code] << "\r\n";
-        std::string res_headers = os.str();
-        send(s, res_headers.data(), res_headers.size(), 0);
-        for (auto h : res.headers) {
-          auto hh = h.first + ": " + h.second + "\r\n";
-          send(s, hh.data(), hh.size(), 0);
+      while (1) {
+        while ((rret = recv(s, buf + buflen, sizeof(buf) - buflen, 0)) == -1 && errno == EINTR);
+        if (rret <= 0) {
+          // IOError
+          continue;
         }
-        send(s, "\r\n", 2, 0);
-        send(s, res.content.data(), res.content.size(), 0);
+
+        prevbuflen = buflen;
+        buflen += rret;
+        num_headers = sizeof(headers) / sizeof(headers[0]);
+        pret = phr_parse_request(
+            buf, buflen, &method, &method_len, &path, &path_len,
+            &minor_version, headers, &num_headers, prevbuflen);
+        if (pret > 0) {
+          break;
+        }
+        if (pret == -1) {
+          // ParseError
+          continue;
+        }
+        if (buflen == sizeof(buf)) {
+          // RequestIsTooLongError
+          continue;
+        }
       }
-    } else {
-      std::string res_headers = "HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\n\r\nNot Found";
-      send(s, res_headers.data(), res_headers.size(), 0);
-    }
-    closesocket(s);
+
+      std::string req_method(method, method_len);
+      std::string req_path(path, path_len);
+      std::string req_body(buf + pret, buflen - pret);
+
+      std::istringstream iss(req_path);
+      std::map<std::string, std::string> req_uri_params;
+      std::vector<header> req_headers;
+
+      if (std::getline(iss, req_path, '?')) {
+        std::string keyval, key, val;
+        while(std::getline(iss, keyval, '&')) {
+          std::istringstream isk(keyval);
+          // TODO unescape query strings
+          if(std::getline(std::getline(isk, key, '='), val))
+            req_uri_params[std::move(key)] = std::move(val);
+        }
+      }
+      for (auto n = 0; n < num_headers; n++)
+        req_headers.push_back(std::move(std::make_pair(
+          std::move(std::string(headers[n].name, headers[n].name_len)),
+          std::move(std::string(headers[n].value, headers[n].value_len)))));
+
+      logger().get(INFO) << req_method << " " << req_path;
+
+      request req(
+          req_method,
+          req_path,
+          req_path,
+          std::move(req_uri_params),
+          std::move(req_headers),
+          std::move(req_body));
+
+      // TODO
+      // bloom filter to handle URL parameters
+	  auto it = handlers.find(req_method + " " + req_path);
+      if (it != handlers.end()) {
+        if (it->second.fs != nullptr) {
+          auto res = it->second.fs(req);
+          std::string res_headers = "HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\n\r\n";
+          send(s, res_headers.data(), res_headers.size(), 0);
+          send(s, res.data(), res.size(), 0);
+        } else if (it->second.fw != nullptr) {
+          response_writer writer(s, 200);
+          it->second.fw(writer, req);
+        } else if (it->second.fr != nullptr) {
+          auto res = it->second.fr(req);
+          std::ostringstream os;
+          os << "HTTP/1.0 " << res.code << " " << status_codes[res.code] << "\r\n";
+          std::string res_headers = os.str();
+          send(s, res_headers.data(), res_headers.size(), 0);
+          for (auto h : res.headers) {
+            auto hh = h.first + ": " + h.second + "\r\n";
+            send(s, hh.data(), hh.size(), 0);
+          }
+          send(s, "\r\n", 2, 0);
+          send(s, res.content.data(), res.content.size(), 0);
+        }
+      } else {
+        std::string res_headers = "HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\n\r\nNot Found";
+        send(s, res_headers.data(), res_headers.size(), 0);
+      }
+      closesocket(s);
+    });
+    t.detach();
   }
 }
 
