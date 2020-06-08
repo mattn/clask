@@ -4,6 +4,7 @@
 #include <vector>
 #include <string>
 #include <map>
+#include <unordered_map>
 #include <exception>
 #include <sstream>
 #include <iomanip>
@@ -159,16 +160,13 @@ public:
 
 static std::string camelize(std::string s) {
   int n = s.length();
-  int res_ind = 0;
   for (auto i = 0; i < n; i++) {
-    if (s[i] == ' ' || s[i] == '-') {
-      s[i] = '-';
-      s[i + 1] = std::toupper(s[i + 1]);
+    if (i == 0 || s[i-1] == ' ' || s[i-1] == '-') {
+      s[i] = std::toupper(s[i]);
       continue;
     }
-    s[res_ind++] = s[i];
   }
-  return s.substr(0, res_ind);
+  return s.substr(0, n);
 }
 
 void response::set_header(std::string key, std::string value) {
@@ -218,10 +216,14 @@ struct request {
 typedef std::function<void(response&, request&)> functor;
 typedef std::function<std::string(request&)> functor_string;
 
+typedef struct {
+  functor ff;
+  functor_string fs;
+} func_t;
+
 class server_t {
 private:
-  std::vector<std::pair<std::string, functor>> handlers;
-  std::vector<std::pair<std::string, functor_string>> handlers_string;
+  std::unordered_map<std::string, func_t> handlers;
 
 public:
   void GET(std::string path, functor fn);
@@ -233,19 +235,19 @@ public:
 };
 
 void server_t::GET(std::string path, functor fn) {
-  handlers.push_back(std::make_pair(path, fn));
+  handlers[path] = func_t { .ff = fn };
 }
 
 void server_t::POST(std::string path, functor fn) {
-  handlers.push_back(std::make_pair(path, fn));
+  handlers[path] = func_t { .ff = fn };
 }
 
 void server_t::GET(std::string path, functor_string fn) {
-  handlers_string.push_back(std::make_pair(path, fn));
+  handlers[path] = func_t { .fs = fn };
 }
 
 void server_t::POST(std::string path, functor_string fn) {
-  handlers_string.push_back(std::make_pair(path, fn));
+  handlers[path] = func_t { .fs = fn };
 }
 
 void server_t::run() {
@@ -349,31 +351,20 @@ void server_t::run() {
         req_headers,
         req_body);
 
-    bool found = false;
     // TODO
-    // use unordered_map
     // bloom filter to handle URL parameters
-    for (auto h : handlers_string) {
-      if (h.first == req_path) {
-        found = true;
-        auto res = h.second(req);
+	auto it = handlers.find(req_path);
+    if (it != handlers.end()) {
+      if (it->second.fs != nullptr) {
+        auto res = it->second.fs(req);
         std::string res_headers = "HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\n\r\n";
         send(s, res_headers.data(), res_headers.size(), 0);
         send(s, res.data(), res.size(), 0);
-        break;
+      } else if (it->second.ff != nullptr) {
+        response res(s, 200);
+        it->second.ff(res, req);
       }
-    }
-    if (!found) {
-      for (auto h : handlers) {
-        if (h.first == req_path) {
-          found = true;
-          response res(s, 200);
-          h.second(res, req);
-          break;
-        }
-      }
-    }
-    if (!found) {
+    } else {
       std::string res_headers = "HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\n\r\nNot Found";
       send(s, res_headers.data(), res_headers.size(), 0);
     }
