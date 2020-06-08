@@ -15,7 +15,7 @@ int main() {
     resp.set_header("content-type", "text/html");
     resp.write("he<b>l</b>lo");
   });
-  s.GET("/foo", [](clask::request& req) -> clask::response {
+  s.GET("/bar", [](clask::request& req) -> clask::response {
     return clask::response {
       .code = 200,
       .content = "hello",

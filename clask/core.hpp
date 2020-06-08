@@ -264,11 +264,11 @@ void server_t::POST(std::string path, functor_string fn) {
 }
 
 void server_t::GET(std::string path, functor_response fn) {
-  handlers[methodGET + path] = func_t { .fr = fn };
+  handlers[methodGET + path].fr = fn;
 }
 
 void server_t::POST(std::string path, functor_response fn) {
-  handlers[methodPOST + path] = func_t { .fr = fn };
+  handlers[methodPOST + path].fr = fn;
 }
 
 void server_t::run() {
@@ -382,10 +382,20 @@ void server_t::run() {
         send(s, res_headers.data(), res_headers.size(), 0);
         send(s, res.data(), res.size(), 0);
       } else if (it->second.fw != nullptr) {
-        response_writer res(s, 200);
-        it->second.fw(res, req);
+        response_writer writer(s, 200);
+        it->second.fw(writer, req);
       } else if (it->second.fr != nullptr) {
         auto res = it->second.fr(req);
+        std::ostringstream os;
+        os << "HTTP/1.0 " << res.code << " " << status_codes[res.code] << "\r\n";
+        std::string res_headers = os.str();
+        send(s, res_headers.data(), res_headers.size(), 0);
+        for (auto h : res.headers) {
+          auto hh = h.first + ": " + h.second + "\r\n";
+          send(s, hh.data(), hh.size(), 0);
+        }
+        send(s, "\r\n", 2, 0);
+        send(s, res.content.data(), res.content.size(), 0);
       }
     } else {
       std::string res_headers = "HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\n\r\nNot Found";
