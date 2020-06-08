@@ -234,20 +234,23 @@ public:
   logger log;
 };
 
+static std::string methodGET = "GET ";
+static std::string methodPOST = "POST ";
+
 void server_t::GET(std::string path, functor fn) {
-  handlers[path] = func_t { .ff = fn };
+  handlers[methodGET + path] = func_t { .ff = fn };
 }
 
 void server_t::POST(std::string path, functor fn) {
-  handlers[path] = func_t { .ff = fn };
+  handlers[methodPOST + path] = func_t { .ff = fn };
 }
 
 void server_t::GET(std::string path, functor_string fn) {
-  handlers[path] = func_t { .fs = fn };
+  handlers[methodGET + path] = func_t { .fs = fn };
 }
 
 void server_t::POST(std::string path, functor_string fn) {
-  handlers[path] = func_t { .fs = fn };
+  handlers[methodPOST + path] = func_t { .fs = fn };
 }
 
 void server_t::run() {
@@ -353,7 +356,7 @@ void server_t::run() {
 
     // TODO
     // bloom filter to handle URL parameters
-	auto it = handlers.find(req_path);
+	auto it = handlers.find(req_method + " " + req_path);
     if (it != handlers.end()) {
       if (it->second.fs != nullptr) {
         auto res = it->second.fs(req);
