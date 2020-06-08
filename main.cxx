@@ -19,6 +19,9 @@ int main() {
     return clask::response {
       .code = 200,
       .content = "hello",
+      .headers = {
+        { "X-Host", "hogehoge" },
+      },
     };
   });
   s.run();
