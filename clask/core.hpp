@@ -86,7 +86,7 @@ logger::~logger() {
 
 typedef std::pair<std::string, std::string> header;
 
-static std::map<int, std::string> status_codes = {
+static std::unordered_map<int, std::string> status_codes = {
   { 100, "Continue" },
   { 101, "Switching Protocols" },
   { 102, "Processing" },
@@ -208,12 +208,12 @@ struct request {
   std::string uri;
   std::string raw_uri;
   std::vector<header> headers;
-  std::map<std::string, std::string> uri_params;
+  std::unordered_map<std::string, std::string> uri_params;
   std::string body;
 
   request(
       std::string method, std::string raw_uri, std::string uri,
-      std::map<std::string, std::string> uri_params,
+      std::unordered_map<std::string, std::string> uri_params,
       std::vector<header> headers, std::string body)
     : method(method), raw_uri(std::move(raw_uri)),
       uri(std::move(uri)), uri_params(std::move(uri_params)),
@@ -301,7 +301,7 @@ void server_t::run() {
   if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
     throw std::runtime_error("bind failed");
   }
-  if (listen(server_fd, 5000) < 0) {
+  if (listen(server_fd, SOMAXCONN) < 0) {
     throw std::runtime_error("listen");
   }
 
@@ -324,7 +324,8 @@ retry:
         while ((rret = recv(s, buf + buflen, sizeof(buf) - buflen, 0)) == -1 && errno == EINTR);
         if (rret <= 0) {
           // IOError
-          continue;
+          closesocket(s);
+          return;
         }
 
         prevbuflen = buflen;
@@ -351,7 +352,7 @@ retry:
       std::string req_body(buf + pret, buflen - pret);
 
       std::istringstream iss(req_path);
-      std::map<std::string, std::string> req_uri_params;
+      std::unordered_map<std::string, std::string> req_uri_params;
       std::vector<header> req_headers;
 
       if (std::getline(iss, req_path, '?')) {
@@ -363,10 +364,14 @@ retry:
             req_uri_params[std::move(key)] = std::move(val);
         }
       }
-      for (auto n = 0; n < num_headers; n++)
-        req_headers.push_back(std::move(std::make_pair(
-          std::move(std::string(headers[n].name, headers[n].name_len)),
-          std::move(std::string(headers[n].value, headers[n].value_len)))));
+      bool keep_alive = false;
+      for (auto n = 0; n < num_headers; n++) {
+        auto key = std::string(headers[n].name, headers[n].name_len);
+        auto value = std::string(headers[n].value, headers[n].value_len);
+        if (key == "Connection" && value == "Keep-Alive")
+          keep_alive = true;
+        req_headers.push_back(std::move(std::make_pair(std::move(key), std::move(value))));
+      }
 
       logger().get(INFO) << req_method << " " << req_path;
 
@@ -384,7 +389,11 @@ retry:
       if (it != handlers.end()) {
         if (it->second.fs != nullptr) {
           auto res = it->second.fs(req);
-          std::string res_headers = "HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\n\r\n";
+          std::ostringstream os;
+          os << "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n";
+          os << "Connection: " << (keep_alive ? "Keep-Alive" : "Close") << "\r\n\r\n";
+          os << "Content-Length: " << res.size() << "\r\n\r\n";
+          auto res_headers = os.str();
           send(s, res_headers.data(), res_headers.size(), 0);
           send(s, res.data(), res.size(), 0);
         } else if (it->second.fw != nullptr) {
@@ -393,7 +402,7 @@ retry:
         } else if (it->second.fr != nullptr) {
           auto res = it->second.fr(req);
           std::ostringstream os;
-          os << "HTTP/1.0 " << res.code << " " << status_codes[res.code] << "\r\n";
+          os << "HTTP/1.1 " << res.code << " " << status_codes[res.code] << "\r\n";
           std::string res_headers = os.str();
           send(s, res_headers.data(), res_headers.size(), 0);
           for (auto h : res.headers) {
@@ -408,11 +417,8 @@ retry:
         send(s, res_headers.data(), res_headers.size(), 0);
       }
 
-      for (auto hh : req_headers) {
-        if (hh.first == "Connection" && hh.second == "keep-alive") {
-          goto retry;
-        }
-      }
+      if (keep_alive)
+        goto retry;
       closesocket(s);
     }, s);
     t.detach();
