@@ -10,7 +10,6 @@
 #include <iomanip>
 #include <algorithm>
 
-#include <cstdio>
 #include <ctime>
 
 #ifdef _WIN32
@@ -147,14 +146,14 @@ static std::map<int, std::string> status_codes = {
   { 511, "Network Authentication Required" },
 };
 
-class response {
+class response_writer {
 private:
   std::vector<header> headers;
   bool header_out;
   int s;
 public:
   int code;
-  response(int s, int code) : s(s), code(code), header_out(false) { }
+  response_writer(int s, int code) : s(s), code(code), header_out(false) { }
   void set_header(std::string, std::string);
   void write(std::string);
 };
@@ -170,7 +169,7 @@ static std::string camelize(std::string s) {
   return s.substr(0, n);
 }
 
-void response::set_header(std::string key, std::string value) {
+void response_writer::set_header(std::string key, std::string value) {
   auto h = camelize(key);
   for (auto hh : headers) {
     if (hh.first == h) {
@@ -181,7 +180,7 @@ void response::set_header(std::string key, std::string value) {
   headers.push_back(std::make_pair(h, value));
 }
 
-void response::write(std::string content) {
+void response_writer::write(std::string content) {
   if (!header_out) {
     header_out = true;
     std::ostringstream os;
@@ -196,6 +195,12 @@ void response::write(std::string content) {
   }
   send(s, content.data(), content.size(), 0);
 }
+
+struct response {
+  int code;
+  std::string content;
+  std::vector<header> headers;
+};
 
 struct request {
   std::string method;
@@ -214,12 +219,14 @@ struct request {
       headers(std::move(headers)), body(std::move(body)) { }
 };
 
-typedef std::function<void(response&, request&)> functor;
+typedef std::function<void(response_writer&, request&)> functor_writer;
 typedef std::function<std::string(request&)> functor_string;
+typedef std::function<response(request&)> functor_response;
 
 typedef struct {
-  functor ff;
+  functor_writer fw;
   functor_string fs;
+  functor_response fr;
 } func_t;
 
 class server_t {
@@ -227,10 +234,12 @@ private:
   std::unordered_map<std::string, func_t> handlers;
 
 public:
-  void GET(std::string path, functor fn);
-  void POST(std::string path, functor fn);
+  void GET(std::string path, functor_writer fn);
+  void POST(std::string path, functor_writer fn);
   void GET(std::string path, functor_string fn);
   void POST(std::string path, functor_string fn);
+  void GET(std::string path, functor_response fn);
+  void POST(std::string path, functor_response fn);
   void run();
   logger log;
 };
@@ -238,12 +247,12 @@ public:
 static std::string methodGET = "GET ";
 static std::string methodPOST = "POST ";
 
-void server_t::GET(std::string path, functor fn) {
-  handlers[methodGET + path].ff = fn;
+void server_t::GET(std::string path, functor_writer fn) {
+  handlers[methodGET + path].fw = fn;
 }
 
-void server_t::POST(std::string path, functor fn) {
-  handlers[methodPOST + path].ff = fn;
+void server_t::POST(std::string path, functor_writer fn) {
+  handlers[methodPOST + path].fw = fn;
 }
 
 void server_t::GET(std::string path, functor_string fn) {
@@ -252,6 +261,14 @@ void server_t::GET(std::string path, functor_string fn) {
 
 void server_t::POST(std::string path, functor_string fn) {
   handlers[methodPOST + path].fs = fn;
+}
+
+void server_t::GET(std::string path, functor_response fn) {
+  handlers[methodGET + path] = func_t { .fr = fn };
+}
+
+void server_t::POST(std::string path, functor_response fn) {
+  handlers[methodPOST + path] = func_t { .fr = fn };
 }
 
 void server_t::run() {
@@ -337,7 +354,7 @@ void server_t::run() {
         std::istringstream isk(keyval);
         // TODO unescape query strings
         if(std::getline(std::getline(isk, key, '='), val))
-          req_uri_params[key] = val;
+          req_uri_params[std::move(key)] = std::move(val);
       }
     }
     for (auto n = 0; n < num_headers; n++)
@@ -348,12 +365,12 @@ void server_t::run() {
     logger().get(INFO) << req_method << " " << req_path;
 
     request req(
-        req_method,
-        req_path,
-        req_path,
-        req_uri_params,
-        req_headers,
-        req_body);
+        std::move(req_method),
+        std::move(req_path),
+        std::move(req_path),
+        std::move(req_uri_params),
+        std::move(req_headers),
+        std::move(req_body));
 
     // TODO
     // bloom filter to handle URL parameters
@@ -364,9 +381,11 @@ void server_t::run() {
         std::string res_headers = "HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\n\r\n";
         send(s, res_headers.data(), res_headers.size(), 0);
         send(s, res.data(), res.size(), 0);
-      } else if (it->second.ff != nullptr) {
-        response res(s, 200);
-        it->second.ff(res, req);
+      } else if (it->second.fw != nullptr) {
+        response_writer res(s, 200);
+        it->second.fw(res, req);
+      } else if (it->second.fr != nullptr) {
+        auto res = it->second.fr(req);
       }
     } else {
       std::string res_headers = "HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\n\r\nNot Found";
