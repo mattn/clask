@@ -159,6 +159,21 @@ public:
   void write(std::string);
 };
 
+static std::string url_decode(std::string &s) {
+  std::string ret;
+  int v;
+  for (auto i = 0; i < s.length(); i++) {
+    if (s[i] == '%') {
+      std::sscanf(s.substr(i+1,2).c_str(), "%x", &v);
+      ret += static_cast<char>(v);
+      i += 2;
+    } else {
+      ret += s[i];
+    }
+  }
+  return ret;
+}
+
 static std::string camelize(std::string s) {
   int n = s.length();
   for (auto i = 0; i < n; i++) {
@@ -350,12 +365,16 @@ retry:
       std::string req_method(method, method_len);
       std::string req_path(path, path_len);
       std::string req_body(buf + pret, buflen - pret);
+      std::string req_raw_path = req_path;
 
       std::istringstream iss(req_path);
       std::unordered_map<std::string, std::string> req_uri_params;
       std::vector<header> req_headers;
 
-      if (std::getline(iss, req_path, '?')) {
+      auto pos = req_path.find('?');
+      if (pos >= 0)
+        req_path.resize(pos);
+      if (std::getline(iss, req_raw_path, '?')) {
         std::string keyval, key, val;
         while(std::getline(iss, keyval, '&')) {
           std::istringstream isk(keyval);
@@ -368,6 +387,8 @@ retry:
       for (auto n = 0; n < num_headers; n++) {
         auto key = std::string(headers[n].name, headers[n].name_len);
         auto value = std::string(headers[n].value, headers[n].value_len);
+        url_decode(key);
+        url_decode(value);
         if (key == "Connection" && value == "Keep-Alive")
           keep_alive = true;
         req_headers.push_back(std::move(std::make_pair(std::move(key), std::move(value))));
@@ -377,7 +398,7 @@ retry:
 
       request req(
           req_method,
-          req_path,
+          req_raw_path,
           req_path,
           std::move(req_uri_params),
           std::move(req_headers),
