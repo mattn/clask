@@ -305,14 +305,14 @@ void server_t::run() {
     throw std::runtime_error("listen");
   }
 
-  std::vector<std::thread> threads;
   while (true) {
     int s;
     if ((s = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen))<0) {
       throw std::runtime_error("accept");
     }
 
-    std::thread t([&]{
+    std::thread t([&](int s) {
+retry:
       char buf[4096];
       const char *method, *path;
       int pret, minor_version;
@@ -407,8 +407,14 @@ void server_t::run() {
         std::string res_headers = "HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\n\r\nNot Found";
         send(s, res_headers.data(), res_headers.size(), 0);
       }
+
+      for (auto hh : req_headers) {
+        if (hh.first == "Connection" && hh.second == "keep-alive") {
+          goto retry;
+        }
+      }
       closesocket(s);
-    });
+    }, s);
     t.detach();
   }
 }
