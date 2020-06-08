@@ -29,6 +29,7 @@ socket_perror(const char *s) {
   std::cerr << s << ": " << buf << std::endl;
 }
 #else
+# include <unistd.h>
 # include <sys/fcntl.h>
 # include <sys/types.h>
 # include <sys/socket.h>
@@ -238,19 +239,19 @@ static std::string methodGET = "GET ";
 static std::string methodPOST = "POST ";
 
 void server_t::GET(std::string path, functor fn) {
-  handlers[methodGET + path] = func_t { .ff = fn };
+  handlers[methodGET + path].ff = fn;
 }
 
 void server_t::POST(std::string path, functor fn) {
-  handlers[methodPOST + path] = func_t { .ff = fn };
+  handlers[methodPOST + path].ff = fn;
 }
 
 void server_t::GET(std::string path, functor_string fn) {
-  handlers[methodGET + path] = func_t { .fs = fn };
+  handlers[methodGET + path].fs = fn;
 }
 
 void server_t::POST(std::string path, functor_string fn) {
-  handlers[methodPOST + path] = func_t { .fs = fn };
+  handlers[methodPOST + path].fs = fn;
 }
 
 void server_t::run() {
