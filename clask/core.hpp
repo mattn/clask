@@ -374,10 +374,10 @@ void server_t::run() {
 
 auto server() { return server_t{}; }
 
+log_level logger::default_level = INFO;
+
+log_level& logger::level() {
+  return default_level;
 }
 
-clask::log_level clask::logger::default_level = clask::INFO;
-
-clask::log_level& clask::logger::level() {
-  return default_level;
 }
