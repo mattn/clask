@@ -174,6 +174,19 @@ static std::string url_decode(std::string &s) {
   return ret;
 }
 
+std::unordered_map<std::string, std::string> params(std::string s) {
+  std::unordered_map<std::string, std::string> ret;
+  std::istringstream iss(s);
+  std::string keyval, key, val;
+  while(std::getline(iss, keyval, '&')) {
+    std::istringstream isk(keyval);
+    if(std::getline(std::getline(isk, key, '='), val)) {
+      ret[std::move(url_decode(key))] = std::move(url_decode(val));
+    }
+  }
+  return ret;
+}
+
 static std::string camelize(std::string s) {
   int n = s.length();
   for (auto i = 0; i < n; i++) {
@@ -185,15 +198,15 @@ static std::string camelize(std::string s) {
   return s.substr(0, n);
 }
 
-void response_writer::set_header(std::string key, std::string value) {
+void response_writer::set_header(std::string key, std::string val) {
   auto h = camelize(key);
   for (auto hh : headers) {
     if (hh.first == h) {
-      hh.second = value;
+      hh.second = val;
       return;
     }
   }
-  headers.push_back(std::make_pair(h, value));
+  headers.push_back(std::make_pair(h, val));
 }
 
 void response_writer::write(std::string content) {
@@ -256,7 +269,7 @@ public:
   void POST(std::string path, functor_string fn);
   void GET(std::string path, functor_response fn);
   void POST(std::string path, functor_response fn);
-  void run();
+  void run(int);
   logger log;
 };
 
@@ -287,7 +300,7 @@ void server_t::POST(std::string path, functor_response fn) {
   handlers[methodPOST + path].fr = fn;
 }
 
-void server_t::run() {
+void server_t::run(int port = 8080) {
   int server_fd;
   struct sockaddr_in address;
 #ifdef _WIN32
@@ -352,7 +365,6 @@ retry:
         while ((rret = recv(s, buf + buflen, sizeof(buf) - buflen, 0)) == -1 && errno == EINTR);
         if (rret <= 0) {
           // IOError
-          socket_perror("recv");
           closesocket(s);
           return;
         }
@@ -384,16 +396,15 @@ retry:
       std::vector<header> req_headers;
 
       auto pos = req_path.find('?');
-      if (pos > 0) {
-        //req_path.resize(pos);
+      if (pos != req_path.npos) {
+        req_path.resize(pos);
         std::istringstream iss(req_raw_path);
         if (std::getline(iss, req_raw_path, '?')) {
           std::string keyval, key, val;
           while(std::getline(iss, keyval, '&')) {
             std::istringstream isk(keyval);
-            // TODO unescape query strings
             if(std::getline(std::getline(isk, key, '='), val))
-              req_uri_params[key] = val;
+              req_uri_params[std::move(url_decode(key))] = std::move(url_decode(val));
           }
         }
       }
@@ -401,12 +412,12 @@ retry:
       bool keep_alive = false;
       for (auto n = 0; n < num_headers; n++) {
         auto key = std::string(headers[n].name, headers[n].name_len);
-        auto value = std::string(headers[n].value, headers[n].value_len);
-        url_decode(key);
-        url_decode(value);
-        if (key == "Connection" && value == "Keep-Alive")
+        auto val = std::string(headers[n].value, headers[n].value_len);
+        key = std::move(url_decode(key));
+        val = std::move(url_decode(val));
+        if (key == "Connection" && val == "Keep-Alive")
           keep_alive = true;
-        req_headers.push_back(std::move(std::make_pair(std::move(key), std::move(value))));
+        req_headers.push_back(std::move(std::make_pair(std::move(key), std::move(val))));
       }
 
       logger().get(INFO) << req_method << " " << req_path;

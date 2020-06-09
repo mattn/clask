@@ -1,5 +1,4 @@
 #include <clask/core.hpp>
-#include <inja.hpp>
 
 int main() {
   auto s = clask::server();
@@ -23,17 +22,6 @@ int main() {
       .headers = {
         { "X-Host", "hogehoge" },
       },
-    };
-  });
-
-  inja::Environment env;
-  inja::Template temp = env.parse_template("./index.html");
-  s.GET("/app", [&](clask::request& req) -> clask::response {
-    nlohmann::json data;
-    data["name"] = "world";
-    return clask::response {
-      .code = 200,
-      .content = env.render(temp, data),
     };
   });
   s.run();

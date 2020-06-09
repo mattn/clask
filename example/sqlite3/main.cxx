@@ -17,10 +17,11 @@ main() {
 
   s.GET("/", [&](clask::request& req) -> clask::response {
     nlohmann::json data;
-    const char *sql = "select id, text from bbs order by created";
+    auto sql = "select id, text from bbs order by created";
     sqlite3_stmt *stmt = nullptr;
     sqlite3_prepare(db, sql, -1, &stmt, nullptr);
     int n = 0;
+    data["posts"] = {};
     while (SQLITE_DONE != sqlite3_step(stmt)) {
       data["posts"][n]["id"] = (std::string) (char*) sqlite3_column_text(stmt, 0);
       data["posts"][n]["text"] = (std::string) (char*) sqlite3_column_text(stmt, 1);
@@ -33,24 +34,28 @@ main() {
     };
   });
 
-  //s.POST("/", [&](clask::request& req) -> clask::response {
-    //crow::query_string params(std::string("?") + req.body);
-    //char* q = params.get("text");
-    //if (q == nullptr) {
-    //  res = crow::response(400);
-    //  res.write("bad request");
-    //  res.end();
-    //  return;
-    //}
-    //const char *sql = "insert into bbs(text) values(?)";
-    //sqlite3_stmt *stmt = nullptr;
-    //sqlite3_prepare(db, sql, -1, &stmt, nullptr);
-    //sqlite3_bind_text(stmt, 1, q, -1,
-    //  (sqlite3_destructor_type) SQLITE_TRANSIENT);
-    //sqlite3_step(stmt);
-    //res = crow::response(302);
-    //res.set_header("Location", "/");
-    //res.end();
-  //});
+  s.POST("/post", [&](clask::request& req) -> clask::response {
+    auto params = clask::params(req.body);
+    auto q = params["text"];
+    if (q.empty()) {
+      return clask::response {
+        .code = 400,
+        .content = "Bad Request",
+      };
+    }
+    auto sql = "insert into bbs(text) values(?)";
+    sqlite3_stmt *stmt = nullptr;
+    sqlite3_prepare(db, sql, -1, &stmt, nullptr);
+    sqlite3_bind_text(stmt, 1, q.c_str(), -1,
+      (sqlite3_destructor_type) SQLITE_TRANSIENT);
+    sqlite3_step(stmt);
+    return clask::response {
+      .code = 302,
+      .headers = {
+        { "Location", "/" },
+      },
+    };
+  });
 
   s.run();
+}
