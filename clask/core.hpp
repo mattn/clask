@@ -327,6 +327,19 @@ void server_t::run() {
     }
 
     std::thread t([&](int s) {
+      struct timeval tv;
+      tv.tv_sec = 5;
+      tv.tv_sec = 0;
+      if (setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (char*) &tv, (int) sizeof(tv))) {
+        socket_perror("setsockopt");
+        return;
+      }
+#ifdef _WIN32
+      char opt = 1;
+#else
+      int opt = 1;
+#endif
+
 retry:
       char buf[4096];
       const char *method, *path;
@@ -339,6 +352,7 @@ retry:
         while ((rret = recv(s, buf + buflen, sizeof(buf) - buflen, 0)) == -1 && errno == EINTR);
         if (rret <= 0) {
           // IOError
+          socket_perror("recv");
           closesocket(s);
           return;
         }
@@ -366,23 +380,24 @@ retry:
       std::string req_path(path, path_len);
       std::string req_body(buf + pret, buflen - pret);
       std::string req_raw_path = req_path;
-
-      std::istringstream iss(req_path);
       std::unordered_map<std::string, std::string> req_uri_params;
       std::vector<header> req_headers;
 
       auto pos = req_path.find('?');
-      if (pos >= 0)
-        req_path.resize(pos);
-      if (std::getline(iss, req_raw_path, '?')) {
-        std::string keyval, key, val;
-        while(std::getline(iss, keyval, '&')) {
-          std::istringstream isk(keyval);
-          // TODO unescape query strings
-          if(std::getline(std::getline(isk, key, '='), val))
-            req_uri_params[std::move(key)] = std::move(val);
+      if (pos >= 0) {
+        //req_path.resize(pos);
+        std::istringstream iss(req_raw_path);
+        if (std::getline(iss, req_raw_path, '?')) {
+          std::string keyval, key, val;
+          while(std::getline(iss, keyval, '&')) {
+            std::istringstream isk(keyval);
+            // TODO unescape query strings
+            if(std::getline(std::getline(isk, key, '='), val))
+              req_uri_params[key] = val;
+          }
         }
       }
+
       bool keep_alive = false;
       for (auto n = 0; n < num_headers; n++) {
         auto key = std::string(headers[n].name, headers[n].name_len);
@@ -406,14 +421,15 @@ retry:
 
       // TODO
       // bloom filter to handle URL parameters
-	  auto it = handlers.find(req_method + " " + req_path);
+      auto it = handlers.find(req_method + " " + req_path);
       if (it != handlers.end()) {
         if (it->second.fs != nullptr) {
           auto res = it->second.fs(req);
           std::ostringstream os;
           os << "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n";
-          os << "Connection: " << (keep_alive ? "Keep-Alive" : "Close") << "\r\n\r\n";
-          os << "Content-Length: " << res.size() << "\r\n\r\n";
+          os << "Connection: " << (keep_alive ? "Keep-Alive" : "Close") << "\r\n";
+          os << "Content-Length: " << res.size() << "\r\n";
+          os << "\r\n";
           auto res_headers = os.str();
           send(s, res_headers.data(), res_headers.size(), 0);
           send(s, res.data(), res.size(), 0);
@@ -424,13 +440,16 @@ retry:
           auto res = it->second.fr(req);
           std::ostringstream os;
           os << "HTTP/1.1 " << res.code << " " << status_codes[res.code] << "\r\n";
+          for (auto h : res.headers) {
+            auto key = camelize(h.first);
+            if (key== "Content-Length")
+              continue;
+            os << key + ": " + h.second + "\r\n";
+          }
+          os << "Content-Length: " << res.content.size() << "\r\n";
+          os << "\r\n";
           std::string res_headers = os.str();
           send(s, res_headers.data(), res_headers.size(), 0);
-          for (auto h : res.headers) {
-            auto hh = h.first + ": " + h.second + "\r\n";
-            send(s, hh.data(), hh.size(), 0);
-          }
-          send(s, "\r\n", 2, 0);
           send(s, res.content.data(), res.content.size(), 0);
         }
       } else {
