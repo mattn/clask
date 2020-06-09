@@ -24,9 +24,9 @@ int main() {
 
 ## TODO
 
-* Unescape paths in request
-* Unescape query parameters in request
-* Implement keep-alive
+* ~~Unescape paths in request~~
+* ~~Unescape query parameters in request~~
+* ~~Implement keep-alive~~
 * Serve static file
 * Responses oriented classes such as JSON
 
