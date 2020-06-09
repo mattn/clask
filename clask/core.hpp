@@ -385,7 +385,7 @@ retry:
 
       auto pos = req_path.find('?');
       if (pos > 0) {
-        req_path.resize(pos);
+        //req_path.resize(pos);
         std::istringstream iss(req_raw_path);
         if (std::getline(iss, req_raw_path, '?')) {
           std::string keyval, key, val;
