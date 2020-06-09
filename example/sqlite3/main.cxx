@@ -13,6 +13,23 @@ main() {
   inja::Environment env;
   inja::Template temp = env.parse_template("./index.html");
 
+  env.add_callback("escape", 1, [](inja::Arguments& args) -> std::string {
+	auto s = args.at(0)->get<std::string>(); // Adapt the index and type of the argument
+    std::string buf;
+    buf.reserve(s.size());
+    for(auto i = 0; i != s.size(); ++i) {
+      switch(s[i]) {
+        case '&':  buf.append("&amp;");  break;
+        case '\"': buf.append("&quot;"); break;
+        case '\'': buf.append("&apos;"); break;
+        case '<':  buf.append("&lt;");   break;
+        case '>':  buf.append("&gt;");   break;
+        default:   buf.append(&s[i], 1); break;
+      }
+    }
+	return buf;
+  });
+
   auto s = clask::server();
 
   s.GET("/", [&](clask::request& req) -> clask::response {
@@ -49,6 +66,7 @@ main() {
     sqlite3_bind_text(stmt, 1, q.c_str(), -1,
       (sqlite3_destructor_type) SQLITE_TRANSIENT);
     sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
     return clask::response {
       .code = 302,
       .headers = {

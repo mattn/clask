@@ -8,7 +8,7 @@
     <h2>一行掲示板</h2>
     <ul>
 ## for post in posts
-      <li>{{ post.id }}: {{ post.text }}</li>
+      <li>{{ post.id }}: {{ escape(post.text) }}</li>
 ## endfor
     </ul>
     <form action="/post" method="post">
