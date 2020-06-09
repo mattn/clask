@@ -9,6 +9,7 @@
 #include <sstream>
 #include <iomanip>
 #include <algorithm>
+#include <thread>
 
 #include <ctime>
 
@@ -85,7 +86,7 @@ logger::~logger() {
 
 typedef std::pair<std::string, std::string> header;
 
-static std::map<int, std::string> status_codes = {
+static std::unordered_map<int, std::string> status_codes = {
   { 100, "Continue" },
   { 101, "Switching Protocols" },
   { 102, "Processing" },
@@ -158,6 +159,21 @@ public:
   void write(std::string);
 };
 
+static std::string url_decode(std::string &s) {
+  std::string ret;
+  int v;
+  for (auto i = 0; i < s.length(); i++) {
+    if (s[i] == '%') {
+      std::sscanf(s.substr(i+1,2).c_str(), "%x", &v);
+      ret += static_cast<char>(v);
+      i += 2;
+    } else {
+      ret += s[i];
+    }
+  }
+  return ret;
+}
+
 static std::string camelize(std::string s) {
   int n = s.length();
   for (auto i = 0; i < n; i++) {
@@ -207,12 +223,12 @@ struct request {
   std::string uri;
   std::string raw_uri;
   std::vector<header> headers;
-  std::map<std::string, std::string> uri_params;
+  std::unordered_map<std::string, std::string> uri_params;
   std::string body;
 
   request(
       std::string method, std::string raw_uri, std::string uri,
-      std::map<std::string, std::string> uri_params,
+      std::unordered_map<std::string, std::string> uri_params,
       std::vector<header> headers, std::string body)
     : method(method), raw_uri(std::move(raw_uri)),
       uri(std::move(uri)), uri_params(std::move(uri_params)),
@@ -272,7 +288,7 @@ void server_t::POST(std::string path, functor_response fn) {
 }
 
 void server_t::run() {
-  int server_fd, s;
+  int server_fd;
   struct sockaddr_in address;
 #ifdef _WIN32
   char opt = 1;
@@ -300,108 +316,152 @@ void server_t::run() {
   if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
     throw std::runtime_error("bind failed");
   }
-  if (listen(server_fd, 0) < 0) {
+  if (listen(server_fd, SOMAXCONN) < 0) {
     throw std::runtime_error("listen");
   }
+
   while (true) {
+    int s;
     if ((s = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen))<0) {
       throw std::runtime_error("accept");
     }
-    char buf[4096];
-    const char *method, *path;
-    int pret, minor_version;
-    struct phr_header headers[100];
-    size_t buflen = 0, prevbuflen = 0, method_len, path_len, num_headers;
-    ssize_t rret;
 
-    while (1) {
-      while ((rret = recv(s, buf + buflen, sizeof(buf) - buflen, 0)) == -1 && errno == EINTR);
-      if (rret <= 0) {
-        // IOError
-        continue;
+    std::thread t([&](int s) {
+      struct timeval tv;
+      tv.tv_sec = 5;
+      tv.tv_sec = 0;
+      if (setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (char*) &tv, (int) sizeof(tv))) {
+        socket_perror("setsockopt");
+        return;
       }
+#ifdef _WIN32
+      char opt = 1;
+#else
+      int opt = 1;
+#endif
 
-      prevbuflen = buflen;
-      buflen += rret;
-      num_headers = sizeof(headers) / sizeof(headers[0]);
-      pret = phr_parse_request(
-          buf, buflen, &method, &method_len, &path, &path_len,
-          &minor_version, headers, &num_headers, prevbuflen);
-      if (pret > 0) {
-        break;
-      }
-      if (pret == -1) {
-        // ParseError
-        continue;
-      }
-      if (buflen == sizeof(buf)) {
-        // RequestIsTooLongError
-        continue;
-      }
-    }
+retry:
+      char buf[4096];
+      const char *method, *path;
+      int pret, minor_version;
+      struct phr_header headers[100];
+      size_t buflen = 0, prevbuflen = 0, method_len, path_len, num_headers;
+      ssize_t rret;
 
-    std::string req_method(method, method_len);
-    std::string req_path(path, path_len);
-    std::string req_body(buf + pret, buflen - pret);
-
-    std::istringstream iss(req_path);
-    std::map<std::string, std::string> req_uri_params;
-    std::vector<header> req_headers;
-
-    if (std::getline(iss, req_path, '?')) {
-      std::string keyval, key, val;
-      while(std::getline(iss, keyval, '&')) {
-        std::istringstream isk(keyval);
-        // TODO unescape query strings
-        if(std::getline(std::getline(isk, key, '='), val))
-          req_uri_params[std::move(key)] = std::move(val);
-      }
-    }
-    for (auto n = 0; n < num_headers; n++)
-      req_headers.push_back(std::move(std::make_pair(
-        std::move(std::string(headers[n].name, headers[n].name_len)),
-        std::move(std::string(headers[n].value, headers[n].value_len)))));
-
-    logger().get(INFO) << req_method << " " << req_path;
-
-    request req(
-        req_method,
-        req_path,
-        req_path,
-        req_uri_params,
-        req_headers,
-        req_body);
-
-    // TODO
-    // bloom filter to handle URL parameters
-	auto it = handlers.find(req_method + " " + req_path);
-    if (it != handlers.end()) {
-      if (it->second.fs != nullptr) {
-        auto res = it->second.fs(req);
-        std::string res_headers = "HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\n\r\n";
-        send(s, res_headers.data(), res_headers.size(), 0);
-        send(s, res.data(), res.size(), 0);
-      } else if (it->second.fw != nullptr) {
-        response_writer writer(s, 200);
-        it->second.fw(writer, req);
-      } else if (it->second.fr != nullptr) {
-        auto res = it->second.fr(req);
-        std::ostringstream os;
-        os << "HTTP/1.0 " << res.code << " " << status_codes[res.code] << "\r\n";
-        std::string res_headers = os.str();
-        send(s, res_headers.data(), res_headers.size(), 0);
-        for (auto h : res.headers) {
-          auto hh = h.first + ": " + h.second + "\r\n";
-          send(s, hh.data(), hh.size(), 0);
+      while (1) {
+        while ((rret = recv(s, buf + buflen, sizeof(buf) - buflen, 0)) == -1 && errno == EINTR);
+        if (rret <= 0) {
+          // IOError
+          socket_perror("recv");
+          closesocket(s);
+          return;
         }
-        send(s, "\r\n", 2, 0);
-        send(s, res.content.data(), res.content.size(), 0);
+
+        prevbuflen = buflen;
+        buflen += rret;
+        num_headers = sizeof(headers) / sizeof(headers[0]);
+        pret = phr_parse_request(
+            buf, buflen, &method, &method_len, &path, &path_len,
+            &minor_version, headers, &num_headers, prevbuflen);
+        if (pret > 0) {
+          break;
+        }
+        if (pret == -1) {
+          // ParseError
+          continue;
+        }
+        if (buflen == sizeof(buf)) {
+          // RequestIsTooLongError
+          continue;
+        }
       }
-    } else {
-      std::string res_headers = "HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\n\r\nNot Found";
-      send(s, res_headers.data(), res_headers.size(), 0);
-    }
-    closesocket(s);
+
+      std::string req_method(method, method_len);
+      std::string req_path(path, path_len);
+      std::string req_body(buf + pret, buflen - pret);
+      std::string req_raw_path = req_path;
+      std::unordered_map<std::string, std::string> req_uri_params;
+      std::vector<header> req_headers;
+
+      auto pos = req_path.find('?');
+      if (pos >= 0) {
+        //req_path.resize(pos);
+        std::istringstream iss(req_raw_path);
+        if (std::getline(iss, req_raw_path, '?')) {
+          std::string keyval, key, val;
+          while(std::getline(iss, keyval, '&')) {
+            std::istringstream isk(keyval);
+            // TODO unescape query strings
+            if(std::getline(std::getline(isk, key, '='), val))
+              req_uri_params[key] = val;
+          }
+        }
+      }
+
+      bool keep_alive = false;
+      for (auto n = 0; n < num_headers; n++) {
+        auto key = std::string(headers[n].name, headers[n].name_len);
+        auto value = std::string(headers[n].value, headers[n].value_len);
+        url_decode(key);
+        url_decode(value);
+        if (key == "Connection" && value == "Keep-Alive")
+          keep_alive = true;
+        req_headers.push_back(std::move(std::make_pair(std::move(key), std::move(value))));
+      }
+
+      logger().get(INFO) << req_method << " " << req_path;
+
+      request req(
+          req_method,
+          req_raw_path,
+          req_path,
+          std::move(req_uri_params),
+          std::move(req_headers),
+          std::move(req_body));
+
+      // TODO
+      // bloom filter to handle URL parameters
+      auto it = handlers.find(req_method + " " + req_path);
+      if (it != handlers.end()) {
+        if (it->second.fs != nullptr) {
+          auto res = it->second.fs(req);
+          std::ostringstream os;
+          os << "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n";
+          os << "Connection: " << (keep_alive ? "Keep-Alive" : "Close") << "\r\n";
+          os << "Content-Length: " << res.size() << "\r\n";
+          os << "\r\n";
+          auto res_headers = os.str();
+          send(s, res_headers.data(), res_headers.size(), 0);
+          send(s, res.data(), res.size(), 0);
+        } else if (it->second.fw != nullptr) {
+          response_writer writer(s, 200);
+          it->second.fw(writer, req);
+        } else if (it->second.fr != nullptr) {
+          auto res = it->second.fr(req);
+          std::ostringstream os;
+          os << "HTTP/1.1 " << res.code << " " << status_codes[res.code] << "\r\n";
+          for (auto h : res.headers) {
+            auto key = camelize(h.first);
+            if (key== "Content-Length")
+              continue;
+            os << key + ": " + h.second + "\r\n";
+          }
+          os << "Content-Length: " << res.content.size() << "\r\n";
+          os << "\r\n";
+          std::string res_headers = os.str();
+          send(s, res_headers.data(), res_headers.size(), 0);
+          send(s, res.content.data(), res.content.size(), 0);
+        }
+      } else {
+        std::string res_headers = "HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\n\r\nNot Found";
+        send(s, res_headers.data(), res_headers.size(), 0);
+      }
+
+      if (keep_alive)
+        goto retry;
+      closesocket(s);
+    }, s);
+    t.detach();
   }
 }
 
