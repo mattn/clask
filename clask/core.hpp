@@ -159,6 +159,7 @@ public:
   response_writer(int s, int code) : s(s), code(code), header_out(false) { }
   void set_header(std::string, std::string);
   void write(std::string);
+  void end();
 };
 
 static std::string url_decode(std::string &s) {
@@ -225,6 +226,10 @@ void response_writer::write(std::string content) {
     send(s, "\r\n", 2, 0);
   }
   send(s, content.data(), content.size(), 0);
+}
+
+void response_writer::end() {
+  closesocket(s);
 }
 
 struct response {
