@@ -432,7 +432,7 @@ retry:
         key = std::move(url_decode(key));
         val = std::move(url_decode(val));
         if (key == "Connection") {
-          for (auto& c : val) c = ::tolower(c);
+          for (auto& c : val) c = std::tolower(c);
           if (val == "keep-alive")
             keep_alive = true;
         }
