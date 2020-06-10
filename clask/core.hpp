@@ -179,10 +179,10 @@ static std::string url_decode(std::string &s) {
       ret += s[i];
     }
   }
-  return ret;
+  return std::move(ret);
 }
 
-std::unordered_map<std::string, std::string> params(std::string s) {
+std::unordered_map<std::string, std::string> params(std::string& s) {
   std::unordered_map<std::string, std::string> ret;
   std::istringstream iss(s);
   std::string keyval, key, val;
@@ -192,10 +192,10 @@ std::unordered_map<std::string, std::string> params(std::string s) {
       ret[std::move(url_decode(key))] = std::move(url_decode(val));
     }
   }
-  return ret;
+  return std::move(ret);
 }
 
-static std::string camelize(std::string s) {
+std::string camelize(std::string& s) {
   int n = s.length();
   for (auto i = 0; i < n; i++) {
     if (i == 0 || s[i-1] == ' ' || s[i-1] == '-') {
@@ -203,18 +203,18 @@ static std::string camelize(std::string s) {
       continue;
     }
   }
-  return s.substr(0, n);
+  return std::move(s.substr(0, n));
 }
 
 void response_writer::set_header(std::string key, std::string val) {
   auto h = camelize(key);
-  for (auto hh : headers) {
+  for (auto& hh : headers) {
     if (hh.first == h) {
       hh.second = val;
       return;
     }
   }
-  headers.push_back(std::make_pair(h, val));
+  headers.push_back(std::move(std::make_pair(h, val)));
 }
 
 void response_writer::write(char* buf, size_t n) {
@@ -228,7 +228,7 @@ void response_writer::write(std::string content) {
     os << "HTTP/1.0 " << code << " " << status_codes[code] << "\r\n";
     std::string res_headers = os.str();
     send(s, res_headers.data(), res_headers.size(), 0);
-    for (auto h : headers) {
+    for (auto& h : headers) {
       auto hh = h.first + ": " + h.second + "\r\n";
       send(s, hh.data(), hh.size(), 0);
     }
@@ -294,7 +294,7 @@ void func_t::handle(int s, request& req, bool& keep_alive) {
     auto res = f_response(req);
     std::ostringstream os;
     os << "HTTP/1.1 " << res.code << " " << status_codes[res.code] << "\r\n";
-    for (auto h : res.headers) {
+    for (auto& h : res.headers) {
       auto key = camelize(h.first);
       if (key == "Content-Length")
         continue;
@@ -319,6 +319,7 @@ public:
   void POST(std::string path, functor_string fn);
   void GET(std::string path, functor_response fn);
   void POST(std::string path, functor_response fn);
+  void static_dir(std::string&, std::string&);
   void run(int);
   logger log;
 };
@@ -431,7 +432,14 @@ retry:
       auto pos = req_path.find('?');
       if (pos != req_path.npos) {
         req_path.resize(pos);
-        req_uri_params = params(req_raw_path);
+        std::istringstream iss(req_raw_path);
+        std::string keyval, key, val;
+        while (std::getline(iss, keyval, '&')) {
+          std::istringstream isk(keyval);
+          if(std::getline(std::getline(isk, key, '='), val)) {
+            req_uri_params[std::move(url_decode(key))] = std::move(url_decode(val));
+          }
+        }
       }
 
       bool keep_alive = false;
@@ -462,10 +470,14 @@ retry:
       // bloom filter to handle URL parameters
       auto it = handlers.find(req_method + " " + req_path);
       if (it != handlers.end()) {
-        it->second.handle(s, req, keep_alive);
+        try {
+          it->second.handle(s, req, keep_alive);
+        } catch (std::exception& e) {
+          logger().get(ERR) << e.what();
+        }
       } else {
-        std::string res_headers = "HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\n\r\nNot Found";
-        send(s, res_headers.data(), res_headers.size(), 0);
+        std::string res_content = "HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\n\r\nNot Found";
+        send(s, res_content.data(), res_content.size(), 0);
       }
 
       if (keep_alive)
@@ -476,7 +488,7 @@ retry:
   }
 }
 
-auto server() { return server_t{}; }
+server_t server() { return server_t{}; }
 
 log_level logger::default_level = INFO;
 
