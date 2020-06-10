@@ -28,6 +28,7 @@ socket_perror(const char *s) {
       nullptr);
   std::cerr << s << ": " << buf << std::endl;
 }
+typedef char sockopt_t;
 #else
 # include <unistd.h>
 # include <sys/fcntl.h>
@@ -37,6 +38,7 @@ socket_perror(const char *s) {
 # include <netdb.h>
 #define closesocket(fd) close(fd)
 #define socket_perror(s) perror(s)
+typedef int sockopt_t;
 #endif
 
 #include "picohttpparser.h"
@@ -256,7 +258,40 @@ typedef struct {
   functor_writer fw;
   functor_string fs;
   functor_response fr;
+  void handle(int, request&, bool);
 } func_t;
+
+void func_t::handle(int s, request& req, bool keep_alive) {
+  if (fs != nullptr) {
+    auto res = fs(req);
+    std::ostringstream os;
+    os << "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n";
+    os << "Connection: " << (keep_alive ? "Keep-Alive" : "Close") << "\r\n";
+    os << "Content-Length: " << res.size() << "\r\n";
+    os << "\r\n";
+    auto res_headers = os.str();
+    send(s, res_headers.data(), res_headers.size(), 0);
+    send(s, res.data(), res.size(), 0);
+  } else if (fw != nullptr) {
+    response_writer writer(s, 200);
+    fw(writer, req);
+  } else if (fr != nullptr) {
+    auto res = fr(req);
+    std::ostringstream os;
+    os << "HTTP/1.1 " << res.code << " " << status_codes[res.code] << "\r\n";
+    for (auto h : res.headers) {
+      auto key = camelize(h.first);
+      if (key== "Content-Length")
+        continue;
+      os << key + ": " + h.second + "\r\n";
+    }
+    os << "Content-Length: " << res.content.size() << "\r\n";
+    os << "\r\n";
+    std::string res_headers = os.str();
+    send(s, res_headers.data(), res_headers.size(), 0);
+    send(s, res.content.data(), res.content.size(), 0);
+  }
+}
 
 class server_t {
 private:
@@ -276,38 +311,24 @@ public:
 static std::string methodGET = "GET ";
 static std::string methodPOST = "POST ";
 
-void server_t::GET(std::string path, functor_writer fn) {
-  handlers[methodGET + path].fw = fn;
+#define CLASK_DEFINE_REQUEST(method, functor, name) \
+void server_t::method(std::string path, functor fn) { \
+  handlers[methodGET + path].name = fn; \
 }
 
-void server_t::POST(std::string path, functor_writer fn) {
-  handlers[methodPOST + path].fw = fn;
-}
+CLASK_DEFINE_REQUEST(GET, functor_writer, fw);
+CLASK_DEFINE_REQUEST(POST, functor_writer, fw);
+CLASK_DEFINE_REQUEST(GET, functor_string, fs);
+CLASK_DEFINE_REQUEST(POST, functor_string, fs);
+CLASK_DEFINE_REQUEST(GET, functor_response, fr);
+CLASK_DEFINE_REQUEST(POST, functor_response, fr);
 
-void server_t::GET(std::string path, functor_string fn) {
-  handlers[methodGET + path].fs = fn;
-}
-
-void server_t::POST(std::string path, functor_string fn) {
-  handlers[methodPOST + path].fs = fn;
-}
-
-void server_t::GET(std::string path, functor_response fn) {
-  handlers[methodGET + path].fr = fn;
-}
-
-void server_t::POST(std::string path, functor_response fn) {
-  handlers[methodPOST + path].fr = fn;
-}
+#undef CLASK_DEFINE_REQUEST
 
 void server_t::run(int port = 8080) {
-  int server_fd;
+  int server_fd, s;
   struct sockaddr_in address;
-#ifdef _WIN32
-  char opt = 1;
-#else
-  int opt = 1;
-#endif
+  sockopt_t opt = 1;
   int addrlen = sizeof(address);
 
 #ifdef _WIN32
@@ -324,7 +345,7 @@ void server_t::run(int port = 8080) {
   }
   address.sin_family = AF_INET;
   address.sin_addr.s_addr = INADDR_ANY;
-  address.sin_port = htons(8080);
+  address.sin_port = htons(port);
 
   if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
     throw std::runtime_error("bind failed");
@@ -334,24 +355,19 @@ void server_t::run(int port = 8080) {
   }
 
   while (true) {
-    int s;
     if ((s = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen))<0) {
       throw std::runtime_error("accept");
     }
 
     std::thread t([&](int s) {
-      struct timeval tv;
-      tv.tv_sec = 5;
-      tv.tv_sec = 0;
-      if (setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (char*) &tv, (int) sizeof(tv))) {
-        socket_perror("setsockopt");
-        return;
-      }
-#ifdef _WIN32
-      char opt = 1;
-#else
-      int opt = 1;
-#endif
+      //struct timeval tv;
+      //tv.tv_sec = 5;
+      //tv.tv_sec = 0;
+      //if (setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (char*) &tv, (int) sizeof(tv))) {
+      //  socket_perror("setsockopt");
+      //  return;
+      //}
+      //sockopt_t opt = 1;
 
 retry:
       char buf[4096];
@@ -380,10 +396,12 @@ retry:
         }
         if (pret == -1) {
           // ParseError
-          continue;
+          logger().get(ERR) << "invalid request";
+          return;
         }
         if (buflen == sizeof(buf)) {
           // RequestIsTooLongError
+          logger().get(ERR) << "request is too long";
           continue;
         }
       }
@@ -398,15 +416,7 @@ retry:
       auto pos = req_path.find('?');
       if (pos != req_path.npos) {
         req_path.resize(pos);
-        std::istringstream iss(req_raw_path);
-        if (std::getline(iss, req_raw_path, '?')) {
-          std::string keyval, key, val;
-          while(std::getline(iss, keyval, '&')) {
-            std::istringstream isk(keyval);
-            if(std::getline(std::getline(isk, key, '='), val))
-              req_uri_params[std::move(url_decode(key))] = std::move(url_decode(val));
-          }
-        }
+        req_uri_params = params(req_raw_path);
       }
 
       bool keep_alive = false;
@@ -434,35 +444,7 @@ retry:
       // bloom filter to handle URL parameters
       auto it = handlers.find(req_method + " " + req_path);
       if (it != handlers.end()) {
-        if (it->second.fs != nullptr) {
-          auto res = it->second.fs(req);
-          std::ostringstream os;
-          os << "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n";
-          os << "Connection: " << (keep_alive ? "Keep-Alive" : "Close") << "\r\n";
-          os << "Content-Length: " << res.size() << "\r\n";
-          os << "\r\n";
-          auto res_headers = os.str();
-          send(s, res_headers.data(), res_headers.size(), 0);
-          send(s, res.data(), res.size(), 0);
-        } else if (it->second.fw != nullptr) {
-          response_writer writer(s, 200);
-          it->second.fw(writer, req);
-        } else if (it->second.fr != nullptr) {
-          auto res = it->second.fr(req);
-          std::ostringstream os;
-          os << "HTTP/1.1 " << res.code << " " << status_codes[res.code] << "\r\n";
-          for (auto h : res.headers) {
-            auto key = camelize(h.first);
-            if (key== "Content-Length")
-              continue;
-            os << key + ": " + h.second + "\r\n";
-          }
-          os << "Content-Length: " << res.content.size() << "\r\n";
-          os << "\r\n";
-          std::string res_headers = os.str();
-          send(s, res_headers.data(), res_headers.size(), 0);
-          send(s, res.content.data(), res.content.size(), 0);
-        }
+        it->second.handle(s, req, keep_alive);
       } else {
         std::string res_headers = "HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\n\r\nNot Found";
         send(s, res_headers.data(), res_headers.size(), 0);
