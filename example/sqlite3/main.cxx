@@ -14,7 +14,7 @@ main() {
   inja::Template temp = env.parse_template("./index.html");
 
   env.add_callback("escape", 1, [](inja::Arguments& args) -> std::string {
-	auto s = args.at(0)->get<std::string>(); // Adapt the index and type of the argument
+    auto s = args.at(0)->get<std::string>(); // Adapt the index and type of the argument
     std::string buf;
     buf.reserve(s.size());
     for(auto i = 0; i != s.size(); ++i) {
