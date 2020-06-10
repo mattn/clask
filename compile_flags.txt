@@ -1,4 +1,5 @@
 -std=c++17
+-I.
 -Ic:/msys64/mingw64/include
 -Ic:/msys64/mingw64/include/c++
 -Ic:/msys64/mingw64/x86_64-w64-mingw32/include
