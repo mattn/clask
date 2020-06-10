@@ -258,10 +258,10 @@ typedef struct {
   functor_writer f_writer;
   functor_string f_string;
   functor_response f_response;
-  void handle(int, request&, bool);
+  void handle(int, request&, bool&);
 } func_t;
 
-void func_t::handle(int s, request& req, bool keep_alive) {
+void func_t::handle(int s, request& req, bool& keep_alive) {
   if (f_string != nullptr) {
     auto res = f_string(req);
     std::ostringstream os;
@@ -275,13 +275,14 @@ void func_t::handle(int s, request& req, bool keep_alive) {
   } else if (f_writer != nullptr) {
     response_writer writer(s, 200);
     f_writer(writer, req);
+    keep_alive = false;
   } else if (f_response != nullptr) {
     auto res = f_response(req);
     std::ostringstream os;
     os << "HTTP/1.1 " << res.code << " " << status_codes[res.code] << "\r\n";
     for (auto h : res.headers) {
       auto key = camelize(h.first);
-      if (key== "Content-Length")
+      if (key == "Content-Length")
         continue;
       os << key + ": " + h.second + "\r\n";
     }
@@ -425,8 +426,11 @@ retry:
         auto val = std::string(headers[n].value, headers[n].value_len);
         key = std::move(url_decode(key));
         val = std::move(url_decode(val));
-        if (key == "Connection" && val == "Keep-Alive")
-          keep_alive = true;
+        if (key == "Connection") {
+          for (auto& c : val) c = ::tolower(c);
+          if (val == "keep-alive")
+            keep_alive = true;
+        }
         req_headers.push_back(std::move(std::make_pair(std::move(key), std::move(val))));
       }
 
