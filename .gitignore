@@ -1,3 +1,5 @@
 *.o
 main.exe
 main
+*.db
+*.sqlite
