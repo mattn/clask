@@ -1,3 +1,6 @@
+#ifndef INCLUDE_CLASK_HPP_
+#define INCLUDE_CLASK_HPP_
+
 #include <iostream>
 #include <functional>
 #include <utility>
@@ -482,3 +485,5 @@ log_level& logger::level() {
 }
 
 }
+
+#endif  // INCLUDE_CLASK_HPP_
