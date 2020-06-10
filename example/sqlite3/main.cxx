@@ -2,6 +2,23 @@
 #include <inja.hpp>
 #include <sqlite3.h>
 
+std::string html_escape(inja::Arguments& args) {
+  auto s = args.at(0)->get<std::string>(); // Adapt the index and type of the argument
+  std::string buf;
+  buf.reserve(s.size());
+  for(auto i = 0; i != s.size(); ++i) {
+    switch(s[i]) {
+      case '&':  buf.append("&amp;");  break;
+      case '\"': buf.append("&quot;"); break;
+      case '\'': buf.append("&apos;"); break;
+      case '<':  buf.append("&lt;");   break;
+      case '>':  buf.append("&gt;");   break;
+      default:   buf.append(&s[i], 1); break;
+    }
+  }
+  return buf;
+}
+
 int
 main() {
   sqlite3 *db = nullptr;
@@ -12,23 +29,7 @@ main() {
 
   inja::Environment env;
   inja::Template temp = env.parse_template("./index.html");
-
-  env.add_callback("escape", 1, [](inja::Arguments& args) -> std::string {
-    auto s = args.at(0)->get<std::string>(); // Adapt the index and type of the argument
-    std::string buf;
-    buf.reserve(s.size());
-    for(auto i = 0; i != s.size(); ++i) {
-      switch(s[i]) {
-        case '&':  buf.append("&amp;");  break;
-        case '\"': buf.append("&quot;"); break;
-        case '\'': buf.append("&apos;"); break;
-        case '<':  buf.append("&lt;");   break;
-        case '>':  buf.append("&gt;");   break;
-        default:   buf.append(&s[i], 1); break;
-      }
-    }
-	return buf;
-  });
+  env.add_callback("escape", 1, html_escape);
 
   auto s = clask::server();
 
