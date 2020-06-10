@@ -311,17 +311,17 @@ public:
 static std::string methodGET = "GET ";
 static std::string methodPOST = "POST ";
 
-#define CLASK_DEFINE_REQUEST(method, functor, name) \
-void server_t::method(std::string path, functor fn) { \
+#define CLASK_DEFINE_REQUEST(functor, name) \
+void server_t::GET(std::string path, functor fn) { \
   handlers[methodGET + path].name = fn; \
+} \
+void server_t::POST(std::string path, functor fn) { \
+  handlers[methodPOST + path].name = fn; \
 }
 
-CLASK_DEFINE_REQUEST(GET, functor_writer, fw);
-CLASK_DEFINE_REQUEST(POST, functor_writer, fw);
-CLASK_DEFINE_REQUEST(GET, functor_string, fs);
-CLASK_DEFINE_REQUEST(POST, functor_string, fs);
-CLASK_DEFINE_REQUEST(GET, functor_response, fr);
-CLASK_DEFINE_REQUEST(POST, functor_response, fr);
+CLASK_DEFINE_REQUEST(functor_writer, fw);
+CLASK_DEFINE_REQUEST(functor_string, fs);
+CLASK_DEFINE_REQUEST(functor_response, fr);
 
 #undef CLASK_DEFINE_REQUEST
 
