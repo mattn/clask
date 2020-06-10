@@ -255,15 +255,15 @@ typedef std::function<std::string(request&)> functor_string;
 typedef std::function<response(request&)> functor_response;
 
 typedef struct {
-  functor_writer fw;
-  functor_string fs;
-  functor_response fr;
+  functor_writer f_writer;
+  functor_string f_string;
+  functor_response f_response;
   void handle(int, request&, bool);
 } func_t;
 
 void func_t::handle(int s, request& req, bool keep_alive) {
-  if (fs != nullptr) {
-    auto res = fs(req);
+  if (f_string != nullptr) {
+    auto res = f_string(req);
     std::ostringstream os;
     os << "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n";
     os << "Connection: " << (keep_alive ? "Keep-Alive" : "Close") << "\r\n";
@@ -272,11 +272,11 @@ void func_t::handle(int s, request& req, bool keep_alive) {
     auto res_headers = os.str();
     send(s, res_headers.data(), res_headers.size(), 0);
     send(s, res.data(), res.size(), 0);
-  } else if (fw != nullptr) {
+  } else if (f_writer != nullptr) {
     response_writer writer(s, 200);
-    fw(writer, req);
-  } else if (fr != nullptr) {
-    auto res = fr(req);
+    f_writer(writer, req);
+  } else if (f_response != nullptr) {
+    auto res = f_response(req);
     std::ostringstream os;
     os << "HTTP/1.1 " << res.code << " " << status_codes[res.code] << "\r\n";
     for (auto h : res.headers) {
@@ -311,17 +311,17 @@ public:
 static std::string methodGET = "GET ";
 static std::string methodPOST = "POST ";
 
-#define CLASK_DEFINE_REQUEST(functor, name) \
-void server_t::GET(std::string path, functor fn) { \
-  handlers[methodGET + path].name = fn; \
+#define CLASK_DEFINE_REQUEST(name) \
+void server_t::GET(std::string path, functor_ ## name fn) { \
+  handlers[methodGET + path].f_ ## name = fn; \
 } \
-void server_t::POST(std::string path, functor fn) { \
-  handlers[methodPOST + path].name = fn; \
+void server_t::POST(std::string path, functor_ ## name fn) { \
+  handlers[methodPOST + path].f_ ## name = fn; \
 }
 
-CLASK_DEFINE_REQUEST(functor_writer, fw);
-CLASK_DEFINE_REQUEST(functor_string, fs);
-CLASK_DEFINE_REQUEST(functor_response, fr);
+CLASK_DEFINE_REQUEST(writer);
+CLASK_DEFINE_REQUEST(string);
+CLASK_DEFINE_REQUEST(response);
 
 #undef CLASK_DEFINE_REQUEST
 
