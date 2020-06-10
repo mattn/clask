@@ -1,4 +1,5 @@
 #include <clask/core.hpp>
+#include <fstream>
 
 int main() {
   auto s = clask::server();
@@ -14,6 +15,17 @@ int main() {
   s.GET("/foo", [](clask::response_writer& resp, clask::request& req) {
     resp.set_header("content-type", "text/html");
     resp.write("he<b>l</b>lo");
+    resp.end();
+  });
+  s.GET("/download", [](clask::response_writer& resp, clask::request& req) {
+    resp.set_header("content-type", "application/octet-stream");
+    resp.set_header("content-disposition", "attachment; filename=README.md");
+    std::ifstream is("README.md", std::ios::in | std::ios::binary);
+    char buf[BUFSIZ];
+    while (!is.eof()) {
+      auto size = is.read(buf, sizeof(buf)).gcount();
+      resp.write(buf, size);
+    }
     resp.end();
   });
   s.GET("/bar", [](clask::request& req) -> clask::response {

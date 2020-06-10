@@ -159,7 +159,9 @@ public:
   response_writer(int s, int code) : s(s), code(code), header_out(false) { }
   void set_header(std::string, std::string);
   void write(std::string);
+  void write(char*, size_t);
   void end();
+  friend std::istream & operator >> (std::istream&, response_writer&);
 };
 
 static std::string url_decode(std::string &s) {
@@ -210,6 +212,10 @@ void response_writer::set_header(std::string key, std::string val) {
     }
   }
   headers.push_back(std::make_pair(h, val));
+}
+
+void response_writer::write(char* buf, size_t n) {
+  write(std::string(buf, n));
 }
 
 void response_writer::write(std::string content) {
