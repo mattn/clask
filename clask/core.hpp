@@ -395,7 +395,7 @@ static bool match(node& n, const std::string& s, std::function<void(func_t fn, s
         n = vv;
         found = true;
         break;
-      } else if (vv.name == sub) {
+      } else if (vv.name.empty() || vv.name == sub) {
         n = vv;
         found = true;
         break;
@@ -405,7 +405,6 @@ static bool match(node& n, const std::string& s, std::function<void(func_t fn, s
       break;
     ss = ss.substr(pos);
     if (ss.empty() || n.children.size() == 0) {
-      puts("foo");
       fn(n.fn, args);
       return true;
     }
@@ -557,14 +556,19 @@ retry:
 
       // TODO
       // bloom filter to handle URL parameters
-      if (method == "GET") {
-        match(treeGET, req_path, [&](func_t fn, std::vector<std::string> args) {
+      bool hit = false;
+      if (req_method == "GET") {
+        hit = match(treeGET, req_path, [&](func_t fn, std::vector<std::string> args) {
           fn.handle(s, req, keep_alive);
         });
-      } else if (method == "POST") {
-        match(treePOST, req_path, [&](func_t fn, std::vector<std::string> args) {
+      } else if (req_method == "POST") {
+        hit = match(treePOST, req_path, [&](func_t fn, std::vector<std::string> args) {
           fn.handle(s, req, keep_alive);
         });
+      }
+      if (!hit) {
+        std::string res_content = "HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\n\r\nNot Found";
+        send(s, res_content.data(), res_content.size(), 0);
       }
       /*
       auto it = handlers.find(req_method + " " + req_path);
