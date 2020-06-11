@@ -254,6 +254,7 @@ struct request {
   std::vector<header> headers;
   std::unordered_map<std::string, std::string> uri_params;
   std::string body;
+  std::vector<std::string> args;
 
   request(
       std::string method, std::string raw_uri, std::string uri,
@@ -279,7 +280,7 @@ void func_t::handle(int s, request& req, bool& keep_alive) {
   if (f_string != nullptr) {
     auto res = f_string(req);
     std::ostringstream os;
-    os << "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n";
+    os << "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=UTF-8\r\n";
     os << "Connection: " << (keep_alive ? "Keep-Alive" : "Close") << "\r\n";
     os << "Content-Length: " << res.size() << "\r\n";
     os << "\r\n";
@@ -321,6 +322,8 @@ private:
   std::string compiled_tree;
   node treeGET;
   node treePOST;
+  void parse_tree(node&, const std::string&, func_t);
+  bool match(const std::string&, const std::string&, std::function<void(func_t fn, std::vector<std::string>)>);
 
 public:
   void GET(std::string path, functor_writer fn);
@@ -334,7 +337,7 @@ public:
   logger log;
 };
 
-static void parse_tree(node& n, const std::string& s, func_t fn) {
+void server_t::parse_tree(node& n, const std::string& s, func_t fn) {
   auto pos = s.find('/', 1);
   auto placeholder = s[1] == ':';
   if (pos == std::string::npos) {
@@ -347,7 +350,7 @@ static void parse_tree(node& n, const std::string& s, func_t fn) {
       }
     }
     if (!found) {
-      n.children.push_back(node {
+      n.children.insert(n.children.begin(), node {
         .name = sub,
         .fn = fn,
         .placeholder = placeholder,
@@ -371,11 +374,12 @@ static void parse_tree(node& n, const std::string& s, func_t fn) {
       .placeholder = placeholder,
     };
     parse_tree(nn, s.substr(pos), fn);
-    n.children.push_back(nn);
+    n.children.insert(n.children.begin(), nn);
   }
 }
 
-static bool match(node n, const std::string& s, std::function<void(func_t fn, std::vector<std::string>)> fn) {
+bool server_t::match(const std::string& method, const std::string& s, std::function<void(func_t fn, std::vector<std::string>)> fn) {
+  node n = method == "GET" ? treeGET : treePOST;
   std::vector<std::string> args;
   auto ss = s;
   std::string sub;
@@ -391,7 +395,7 @@ static bool match(node n, const std::string& s, std::function<void(func_t fn, st
     bool found = false;
     for (auto vv : n.children) {
       if (vv.placeholder) {
-        args.push_back(sub);
+        args.push_back(std::move(url_decode(sub)));
         n = vv;
         found = true;
         break;
@@ -557,15 +561,10 @@ retry:
       // TODO
       // bloom filter to handle URL parameters
       bool hit = false;
-      if (req_method == "GET") {
-        hit = match(treeGET, req_path, [&](func_t fn, std::vector<std::string> args) {
-          fn.handle(s, req, keep_alive);
-        });
-      } else if (req_method == "POST") {
-        hit = match(treePOST, req_path, [&](func_t fn, std::vector<std::string> args) {
-          fn.handle(s, req, keep_alive);
-        });
-      }
+      hit = match(req_method, req_path, [&](func_t fn, std::vector<std::string> args) {
+        req.args = args;
+        fn.handle(s, req, keep_alive);
+      });
       if (!hit) {
         std::string res_content = "HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\n\r\nNot Found";
         send(s, res_content.data(), res_content.size(), 0);

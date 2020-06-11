@@ -17,6 +17,9 @@ int main() {
     resp.write("he<b>l</b>lo");
     resp.end();
   });
+  s.GET("/zoo/:name", [](clask::request& req) {
+    return req.args[0];
+  });
   s.GET("/download", [](clask::response_writer& resp, clask::request& req) {
     resp.set_header("content-type", "application/octet-stream");
     resp.set_header("content-disposition", "attachment; filename=README.md");
