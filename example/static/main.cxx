@@ -8,11 +8,13 @@ int main() {
     resp.set_header("content-type", "application/json");
     time_t t;
     struct tm* tm;
-    time(&t);
-    tm = localtime(&t);
-    char buf[32];
-    strftime(buf,sizeof(buf),"{\"time\":\"%Y/%m/%d %H:%M:%S\"}",tm);
-    resp.write(buf);
+    std::time(&t);
+    tm = std::gmtime(&t);
+    std::stringstream date;
+    date <<  R"({"time": ")"
+      << std::put_time(tm, "%a, %d %B %Y %H:%M:%S GMT")
+      << R"("})";
+    resp.write(date.str());
     resp.end();
   });
   s.run();
