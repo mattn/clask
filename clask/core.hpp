@@ -337,8 +337,7 @@ private:
   node treePOST;
   void parse_tree(node&, const std::string&, func_t);
   bool match(const std::string&, const std::string&, std::function<void(func_t fn, std::vector<std::string>)>);
-  std::string sdir;
-  std::string spath;
+  std::pair<std::string, std::string> static_dir_pair;
 
 public:
   void GET(std::string path, functor_writer fn);
@@ -348,6 +347,7 @@ public:
   void GET(std::string path, functor_response fn);
   void POST(std::string path, functor_response fn);
   void static_dir(const std::string&, const std::string&);
+  void bind_static_dirs();
   void run(int);
   logger log;
 };
@@ -449,9 +449,9 @@ CLASK_DEFINE_REQUEST(response);
 #undef CLASK_DEFINE_REQUEST
 
 void server_t::static_dir(const std::string& path, const std::string& dir) {
-  spath = path;
-  sdir = dir;
-  parse_tree(treeGET, spath, func_t {
+  static std::string path_ = path, dir_ = dir;
+
+  parse_tree(treeGET, path, func_t {
     .f_writer = [&](response_writer& resp, request& req) {
       std::vector<std::string> paths;
       std::string p = req.uri;
@@ -475,14 +475,14 @@ void server_t::static_dir(const std::string& path, const std::string& dir) {
         os << *it;
       }
       auto req_path = os.str();
-      auto res = std::mismatch(req_path.begin(), req_path.end(), spath.begin());
-      if (res.first == spath.end()) {
+      auto res = std::mismatch(req_path.begin(), req_path.end(), path_.begin());
+      if (res.first == path_.end()) {
         resp.code = 404;
         resp.set_header("content-type", "text/plain");
         resp.write("Not Found");
         return;
       }
-      req_path = sdir + "/" + req_path.substr(spath.size());
+      req_path = dir_ + "/" + req_path.substr(path_.size());
       if (req_path[req_path.size()-1] == '/') req_path += "/index.html";
 
       std::ifstream is(req_path, std::ios::in | std::ios::binary);
@@ -538,6 +538,13 @@ void server_t::run(int port = 8080) {
 #ifdef _WIN32
   WSADATA wsa;
   WSAStartup(MAKEWORD(2, 0), &wsa);
+#endif
+
+#if 0
+  for (auto v : treeGET.children) {
+    std::cout << v.name << std::endl;
+    std::cout << v.placeholder << std::endl;
+  }
 #endif
 
   if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
