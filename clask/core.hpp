@@ -331,7 +331,6 @@ typedef struct _node {
 
 class server_t {
 private:
-  std::unordered_map<std::string, func_t> handlers;
   std::string compiled_tree;
   node treeGET;
   node treePOST;
@@ -347,7 +346,6 @@ public:
   void GET(std::string path, functor_response fn);
   void POST(std::string path, functor_response fn);
   void static_dir(const std::string&, const std::string&);
-  void bind_static_dirs();
   void run(int);
   logger log;
 };
@@ -429,6 +427,17 @@ bool server_t::match(const std::string& method, const std::string& s, std::funct
     }
   }
   return false;
+}
+
+void sort_handlers(node& n) {
+  std::sort(
+    n.children.begin(),
+    n.children.end(),
+    [](const node& x, const node& y){ return x.name > y.name; }
+  );
+  for (auto& v : n.children) {
+    sort_handlers(v);
+  }
 }
 
 static std::string methodGET = "GET ";
@@ -539,6 +548,9 @@ void server_t::run(int port = 8080) {
   WSADATA wsa;
   WSAStartup(MAKEWORD(2, 0), &wsa);
 #endif
+
+  sort_handlers(treeGET);
+  sort_handlers(treePOST);
 
 #if 0
   for (auto v : treeGET.children) {
@@ -672,19 +684,6 @@ retry:
         std::string res_content = "HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\n\r\nNot Found";
         send(s, res_content.data(), res_content.size(), 0);
       }
-      /*
-      auto it = handlers.find(req_method + " " + req_path);
-      if (it != handlers.end()) {
-        try {
-          it->second.handle(s, req, keep_alive);
-        } catch (std::exception& e) {
-          logger().get(ERR) << e.what();
-        }
-      } else {
-        std::string res_content = "HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\n\r\nNot Found";
-        send(s, res_content.data(), res_content.size(), 0);
-      }
-      */
 
       if (keep_alive)
         goto retry;
