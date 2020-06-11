@@ -308,9 +308,19 @@ void func_t::handle(int s, request& req, bool& keep_alive) {
   }
 }
 
+typedef struct _node {
+  std::vector<struct _node> children;
+  std::string name;
+  func_t fn;
+  bool placeholder;
+} node;
+
 class server_t {
 private:
   std::unordered_map<std::string, func_t> handlers;
+  std::string compiled_tree;
+  node treeGET;
+  node treePOST;
 
 public:
   void GET(std::string path, functor_writer fn);
@@ -324,15 +334,94 @@ public:
   logger log;
 };
 
+static void parse_tree(node& n, const std::string& s, func_t fn) {
+  auto pos = s.find('/', 1);
+  auto placeholder = s[1] == ':';
+  if (pos == std::string::npos) {
+    bool found = false;
+    auto sub = s.substr(placeholder ? 2 : 1);
+    for (auto& vv : n.children) {
+      if (vv.name == sub) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      n.children.push_back(node {
+        .name = sub,
+        .fn = fn,
+        .placeholder = placeholder,
+      });
+    }
+    return;
+  }
+  auto sub = s.substr(1, pos-1);
+  if (placeholder) sub = sub.substr(1);
+  bool found = false;
+  for (auto& vv : n.children) {
+    if (vv.name == sub) {
+      found = true;
+      parse_tree(vv, s.substr(pos), fn);
+      break;
+    }
+  }
+  if (!found) {
+    node nn = {
+      .name = sub,
+      .placeholder = placeholder,
+    };
+    parse_tree(nn, s.substr(pos), fn);
+    n.children.push_back(nn);
+  }
+}
+
+static bool match(node& n, const std::string& s, std::function<void(func_t fn, std::vector<std::string>)> fn) {
+  std::vector<std::string> args;
+  auto ss = s;
+  std::string sub;
+  while (1) {
+    auto pos = ss.find('/', 1);
+
+    if (pos == std::string::npos) {
+      sub = ss.substr(1);
+      pos = ss.size();
+    } else {
+      sub = ss.substr(1, pos-1);
+    }
+    bool found = false;
+    for (auto vv : n.children) {
+      if (vv.placeholder) {
+        args.push_back(sub);
+        n = vv;
+        found = true;
+        break;
+      } else if (vv.name == sub) {
+        n = vv;
+        found = true;
+        break;
+      }
+    }
+    if (!found)
+      break;
+    ss = ss.substr(pos);
+    if (ss.empty() || n.children.size() == 0) {
+      puts("foo");
+      fn(n.fn, args);
+      return true;
+    }
+  }
+  return false;
+}
+
 static std::string methodGET = "GET ";
 static std::string methodPOST = "POST ";
 
 #define CLASK_DEFINE_REQUEST(name) \
 void server_t::GET(std::string path, functor_ ## name fn) { \
-  handlers[methodGET + path].f_ ## name = fn; \
+  parse_tree(treeGET, path, func_t { .f_ ## name = fn }); \
 } \
 void server_t::POST(std::string path, functor_ ## name fn) { \
-  handlers[methodPOST + path].f_ ## name = fn; \
+  parse_tree(treePOST, path, func_t { .f_ ## name = fn }); \
 }
 
 CLASK_DEFINE_REQUEST(writer);
@@ -468,6 +557,16 @@ retry:
 
       // TODO
       // bloom filter to handle URL parameters
+      if (method == "GET") {
+        match(treeGET, req_path, [&](func_t fn, std::vector<std::string> args) {
+          fn.handle(s, req, keep_alive);
+        });
+      } else if (method == "POST") {
+        match(treePOST, req_path, [&](func_t fn, std::vector<std::string> args) {
+          fn.handle(s, req, keep_alive);
+        });
+      }
+      /*
       auto it = handlers.find(req_method + " " + req_path);
       if (it != handlers.end()) {
         try {
@@ -479,6 +578,7 @@ retry:
         std::string res_content = "HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\n\r\nNot Found";
         send(s, res_content.data(), res_content.size(), 0);
       }
+      */
 
       if (keep_alive)
         goto retry;
