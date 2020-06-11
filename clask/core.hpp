@@ -1,17 +1,18 @@
 #ifndef INCLUDE_CLASK_HPP_
 #define INCLUDE_CLASK_HPP_
 
-#include <iostream>
+#include <algorithm>
 #include <functional>
 #include <utility>
 #include <vector>
 #include <string>
-#include <map>
 #include <unordered_map>
 #include <exception>
+#include <iostream>
+#include <fstream>
 #include <sstream>
+#include <iterator>
 #include <iomanip>
-#include <algorithm>
 #include <thread>
 
 #include <ctime>
@@ -332,7 +333,7 @@ public:
   void POST(std::string path, functor_string fn);
   void GET(std::string path, functor_response fn);
   void POST(std::string path, functor_response fn);
-  void static_dir(std::string&, std::string&);
+  void static_dir(std::string, std::string);
   void run(int);
   logger log;
 };
@@ -432,6 +433,56 @@ CLASK_DEFINE_REQUEST(string);
 CLASK_DEFINE_REQUEST(response);
 
 #undef CLASK_DEFINE_REQUEST
+
+void server_t::static_dir(std::string path, std::string dir) {
+  parse_tree(treeGET, path, func_t {
+    .f_writer = [&](response_writer& resp, request& req) {
+      std::vector<std::string> paths;
+      std::string p = req.uri;
+      while (1) {
+        auto pos = p.find('/', 1);
+        if (pos == std::string::npos) {
+          auto sub = p.substr(1);
+          if (sub == "..") paths.pop_back();
+          else paths.push_back(sub);
+          break;
+        } else {
+          auto sub = p.substr(1, pos-1);
+          if (sub == "..") paths.pop_back();
+          else paths.push_back(sub);
+        }
+        p = p.substr(pos);
+      }
+      std::ostringstream os;
+      for (auto it = paths.begin(); it != paths.end(); ++it) {
+        if (it != paths.end()) os << "/";
+        os << *it;
+      }
+      auto req_path = os.str();
+      auto res = std::mismatch(req_path.begin(), req_path.end(), path.begin());
+      if (res.first == path.end()) {
+        resp.code = 404;
+        resp.set_header("content-type", "text/plain");
+        resp.write("Not Found");
+        return;
+      }
+      req_path = dir + "/" + req_path.substr(path.size());
+      if (req_path[req_path.size()-1] == '/') req_path += "/index.html";
+      std::ifstream is(req_path, std::ios::in | std::ios::binary);
+      if (is.fail()) {
+        resp.code = 404;
+        resp.set_header("content-type", "text/plain");
+        resp.write("Not Found");
+        return;
+      }
+      char buf[BUFSIZ];
+      while (!is.eof()) {
+        auto size = is.read(buf, sizeof(buf)).gcount();
+        resp.write(buf, size);
+      }
+    }
+  });
+}
 
 void server_t::run(int port = 8080) {
   int server_fd, s;

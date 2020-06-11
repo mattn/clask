@@ -1,5 +1,4 @@
 #include <clask/core.hpp>
-#include <fstream>
 
 int main() {
   auto s = clask::server();
@@ -17,7 +16,8 @@ int main() {
     resp.write("he<b>l</b>lo");
     resp.end();
   });
-  s.GET("/zoo/:name", [](clask::request& req) {
+  s.GET("/zoo/:name", [](clask::request& req) -> std::string {
+    if (req.args.empty() || req.args[0].empty()) return "Wow!";
     return req.args[0];
   });
   s.GET("/download", [](clask::response_writer& resp, clask::request& req) {
@@ -40,5 +40,6 @@ int main() {
       },
     };
   });
+  s.static_dir("/static/", "./public");
   s.run();
 }
