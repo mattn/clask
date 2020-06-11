@@ -673,14 +673,10 @@ retry:
           std::move(req_headers),
           std::move(req_body));
 
-      // TODO
-      // bloom filter to handle URL parameters
-      bool hit = false;
-      hit = match(req_method, req_path, [&](func_t fn, std::vector<std::string> args) {
+      if (!match(req_method, req_path, [&](func_t fn, std::vector<std::string> args) {
         req.args = args;
         fn.handle(s, req, keep_alive);
-      });
-      if (!hit) {
+      })) {
         std::string res_content = "HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\n\r\nNot Found";
         send(s, res_content.data(), res_content.size(), 0);
       }
