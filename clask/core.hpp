@@ -1,20 +1,21 @@
 #ifndef INCLUDE_CLASK_HPP_
 #define INCLUDE_CLASK_HPP_
 
-#include <iostream>
+#include <algorithm>
 #include <functional>
 #include <utility>
 #include <vector>
 #include <string>
-#include <map>
 #include <unordered_map>
 #include <exception>
+#include <iostream>
+#include <fstream>
 #include <sstream>
+#include <iterator>
 #include <iomanip>
-#include <algorithm>
 #include <thread>
-
-#include <ctime>
+#include <filesystem>
+#include <chrono>
 
 #ifdef _WIN32
 # include <ws2tcpip.h>
@@ -89,6 +90,13 @@ logger::~logger() {
   }
 }
 
+template <typename TP>
+std::time_t to_time_t(TP tp) {
+  using namespace std::chrono;
+  auto sctp = time_point_cast<system_clock::duration>(tp - TP::clock::now() + system_clock::now());
+  return system_clock::to_time_t(sctp);
+}
+
 typedef std::pair<std::string, std::string> header;
 
 static std::unordered_map<int, std::string> status_codes = {
@@ -161,6 +169,7 @@ public:
   int code;
   response_writer(int s, int code) : s(s), code(code), header_out(false) { }
   void set_header(std::string, std::string);
+  void clear_header();
   void write(std::string);
   void write(char*, size_t);
   void end();
@@ -206,6 +215,10 @@ std::string camelize(std::string& s) {
   return std::move(s.substr(0, n));
 }
 
+void response_writer::clear_header() {
+  headers.clear();
+}
+
 void response_writer::set_header(std::string key, std::string val) {
   auto h = camelize(key);
   for (auto& hh : headers) {
@@ -214,7 +227,7 @@ void response_writer::set_header(std::string key, std::string val) {
       return;
     }
   }
-  headers.push_back(std::move(std::make_pair(h, val)));
+  headers.emplace_back(std::move(std::make_pair(h, val)));
 }
 
 void response_writer::write(char* buf, size_t n) {
@@ -254,6 +267,7 @@ struct request {
   std::vector<header> headers;
   std::unordered_map<std::string, std::string> uri_params;
   std::string body;
+  std::vector<std::string> args;
 
   request(
       std::string method, std::string raw_uri, std::string uri,
@@ -279,7 +293,7 @@ void func_t::handle(int s, request& req, bool& keep_alive) {
   if (f_string != nullptr) {
     auto res = f_string(req);
     std::ostringstream os;
-    os << "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n";
+    os << "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=UTF-8\r\n";
     os << "Connection: " << (keep_alive ? "Keep-Alive" : "Close") << "\r\n";
     os << "Content-Length: " << res.size() << "\r\n";
     os << "\r\n";
@@ -308,9 +322,22 @@ void func_t::handle(int s, request& req, bool& keep_alive) {
   }
 }
 
+typedef struct _node {
+  std::vector<struct _node> children;
+  std::string name;
+  func_t fn;
+  bool placeholder;
+} node;
+
 class server_t {
 private:
   std::unordered_map<std::string, func_t> handlers;
+  std::string compiled_tree;
+  node treeGET;
+  node treePOST;
+  void parse_tree(node&, const std::string&, func_t);
+  bool match(const std::string&, const std::string&, std::function<void(func_t fn, std::vector<std::string>)>);
+  std::pair<std::string, std::string> static_dir_pair;
 
 public:
   void GET(std::string path, functor_writer fn);
@@ -319,20 +346,100 @@ public:
   void POST(std::string path, functor_string fn);
   void GET(std::string path, functor_response fn);
   void POST(std::string path, functor_response fn);
-  void static_dir(std::string&, std::string&);
+  void static_dir(const std::string&, const std::string&);
+  void bind_static_dirs();
   void run(int);
   logger log;
 };
+
+void server_t::parse_tree(node& n, const std::string& s, func_t fn) {
+  auto pos = s.find('/', 1);
+  auto placeholder = s[1] == ':';
+  if (pos == std::string::npos) {
+    bool found = false;
+    auto sub = s.substr(placeholder ? 2 : 1);
+    for (auto& vv : n.children) {
+      if (vv.name == sub) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      n.children.insert(n.children.begin(), node {
+        .name = sub,
+        .fn = fn,
+        .placeholder = placeholder,
+      });
+    }
+    return;
+  }
+  auto sub = s.substr(1, pos-1);
+  if (placeholder) sub = sub.substr(1);
+  bool found = false;
+  for (auto& vv : n.children) {
+    if (vv.name == sub) {
+      found = true;
+      parse_tree(vv, s.substr(pos), fn);
+      break;
+    }
+  }
+  if (!found) {
+    node nn = {
+      .name = sub,
+      .placeholder = placeholder,
+    };
+    parse_tree(nn, s.substr(pos), fn);
+    n.children.insert(n.children.begin(), nn);
+  }
+}
+
+bool server_t::match(const std::string& method, const std::string& s, std::function<void(func_t fn, std::vector<std::string>)> fn) {
+  node n = method == "GET" ? treeGET : treePOST;
+  std::vector<std::string> args;
+  auto ss = s;
+  std::string sub;
+  while (1) {
+    auto pos = ss.find('/', 1);
+
+    if (pos == std::string::npos) {
+      sub = ss.substr(1);
+      pos = ss.size();
+    } else {
+      sub = ss.substr(1, pos-1);
+    }
+    bool found = false;
+    for (auto vv : n.children) {
+      if (vv.placeholder) {
+        args.emplace_back(std::move(url_decode(sub)));
+        n = vv;
+        found = true;
+        break;
+      } else if (vv.name.empty() || vv.name == sub) {
+        n = vv;
+        found = true;
+        break;
+      }
+    }
+    if (!found)
+      break;
+    ss = ss.substr(pos);
+    if (ss.empty() || n.children.size() == 0) {
+      fn(n.fn, args);
+      return true;
+    }
+  }
+  return false;
+}
 
 static std::string methodGET = "GET ";
 static std::string methodPOST = "POST ";
 
 #define CLASK_DEFINE_REQUEST(name) \
 void server_t::GET(std::string path, functor_ ## name fn) { \
-  handlers[methodGET + path].f_ ## name = fn; \
+  parse_tree(treeGET, path, func_t { .f_ ## name = fn }); \
 } \
 void server_t::POST(std::string path, functor_ ## name fn) { \
-  handlers[methodPOST + path].f_ ## name = fn; \
+  parse_tree(treePOST, path, func_t { .f_ ## name = fn }); \
 }
 
 CLASK_DEFINE_REQUEST(writer);
@@ -340,6 +447,87 @@ CLASK_DEFINE_REQUEST(string);
 CLASK_DEFINE_REQUEST(response);
 
 #undef CLASK_DEFINE_REQUEST
+
+void server_t::static_dir(const std::string& path, const std::string& dir) {
+  static std::string path_ = path, dir_ = dir;
+
+  parse_tree(treeGET, path, func_t {
+    .f_writer = [&](response_writer& resp, request& req) {
+      std::vector<std::string> paths;
+      std::string p = req.uri;
+      while (1) {
+        auto pos = p.find('/', 1);
+        if (pos == std::string::npos) {
+          auto sub = p.substr(1);
+          if (sub == "..") paths.pop_back();
+          else paths.emplace_back(sub);
+          break;
+        } else {
+          auto sub = p.substr(1, pos-1);
+          if (sub == "..") paths.pop_back();
+          else paths.emplace_back(sub);
+        }
+        p = p.substr(pos);
+      }
+      std::ostringstream os;
+      for (auto it = paths.begin(); it != paths.end(); ++it) {
+        if (it != paths.end()) os << "/";
+        os << *it;
+      }
+      auto req_path = os.str();
+      auto res = std::mismatch(req_path.begin(), req_path.end(), path_.begin());
+      if (res.first == path_.end()) {
+        resp.code = 404;
+        resp.set_header("content-type", "text/plain");
+        resp.write("Not Found");
+        return;
+      }
+      req_path = dir_ + "/" + req_path.substr(path_.size());
+      if (req_path[req_path.size()-1] == '/') req_path += "/index.html";
+
+      std::ifstream is(req_path, std::ios::in | std::ios::binary);
+      if (is.fail()) {
+        resp.clear_header();
+        resp.code = 404;
+        resp.set_header("content-type", "text/plain");
+        resp.write("Not Found");
+        return;
+      }
+
+      std::filesystem::path fspath(req_path);
+      std::uintmax_t size = std::filesystem::file_size(fspath);
+      resp.set_header("content-length", std::to_string(size));
+
+      std::filesystem::file_time_type file_time = std::filesystem::last_write_time(req_path);
+      std::time_t tt = to_time_t(file_time);
+      std::tm *gmt = std::gmtime(&tt);
+      for (auto& h : req.headers) {
+        if (h.first == "If-Modified-Since") {
+          std::tm fgmt;
+          std::get_time(&fgmt, h.second.c_str());
+          if (std::mktime(&fgmt) <= std::mktime(gmt)) {
+            resp.clear_header();
+            resp.code = 304;
+            resp.set_header("content-type", "text/plain");
+            resp.write("Not Modified");
+            return;
+          }
+          break;
+        }
+      }
+
+      std::stringstream date;
+      date << std::put_time(gmt, "%a, %d %B %Y %H:%M:%S GMT");
+      resp.set_header("last-modified", date.str());
+
+      char buf[BUFSIZ];
+      while (!is.eof()) {
+        auto size = is.read(buf, sizeof(buf)).gcount();
+        resp.write(buf, size);
+      }
+    }
+  });
+}
 
 void server_t::run(int port = 8080) {
   int server_fd, s;
@@ -350,6 +538,13 @@ void server_t::run(int port = 8080) {
 #ifdef _WIN32
   WSADATA wsa;
   WSAStartup(MAKEWORD(2, 0), &wsa);
+#endif
+
+#if 0
+  for (auto v : treeGET.children) {
+    std::cout << v.name << std::endl;
+    std::cout << v.placeholder << std::endl;
+  }
 #endif
 
   if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
@@ -453,7 +648,7 @@ retry:
           if (val == "keep-alive")
             keep_alive = true;
         }
-        req_headers.push_back(std::move(std::make_pair(std::move(key), std::move(val))));
+        req_headers.emplace_back(std::move(std::make_pair(std::move(key), std::move(val))));
       }
 
       logger().get(INFO) << req_method << " " << req_path;
@@ -468,6 +663,16 @@ retry:
 
       // TODO
       // bloom filter to handle URL parameters
+      bool hit = false;
+      hit = match(req_method, req_path, [&](func_t fn, std::vector<std::string> args) {
+        req.args = args;
+        fn.handle(s, req, keep_alive);
+      });
+      if (!hit) {
+        std::string res_content = "HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\n\r\nNot Found";
+        send(s, res_content.data(), res_content.size(), 0);
+      }
+      /*
       auto it = handlers.find(req_method + " " + req_path);
       if (it != handlers.end()) {
         try {
@@ -479,6 +684,7 @@ retry:
         std::string res_content = "HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\n\r\nNot Found";
         send(s, res_content.data(), res_content.size(), 0);
       }
+      */
 
       if (keep_alive)
         goto retry;

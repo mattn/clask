@@ -27,7 +27,7 @@ int main() {
 * ~~Unescape paths in request~~
 * ~~Unescape query parameters in request~~
 * ~~Implement keep-alive~~
-* Serve static file
+* ~~Serve static file~~
 * Responses oriented classes such as JSON
 
 ## License
