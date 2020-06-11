@@ -375,7 +375,7 @@ static void parse_tree(node& n, const std::string& s, func_t fn) {
   }
 }
 
-static bool match(node& n, const std::string& s, std::function<void(func_t fn, std::vector<std::string>)> fn) {
+static bool match(node n, const std::string& s, std::function<void(func_t fn, std::vector<std::string>)> fn) {
   std::vector<std::string> args;
   auto ss = s;
   std::string sub;
