@@ -14,8 +14,8 @@
 #include <iterator>
 #include <iomanip>
 #include <thread>
-
-#include <ctime>
+#include <filesystem>
+#include <chrono>
 
 #ifdef _WIN32
 # include <ws2tcpip.h>
@@ -90,6 +90,13 @@ logger::~logger() {
   }
 }
 
+template <typename TP>
+std::time_t to_time_t(TP tp) {
+  using namespace std::chrono;
+  auto sctp = time_point_cast<system_clock::duration>(tp - TP::clock::now() + system_clock::now());
+  return system_clock::to_time_t(sctp);
+}
+
 typedef std::pair<std::string, std::string> header;
 
 static std::unordered_map<int, std::string> status_codes = {
@@ -162,6 +169,7 @@ public:
   int code;
   response_writer(int s, int code) : s(s), code(code), header_out(false) { }
   void set_header(std::string, std::string);
+  void clear_header();
   void write(std::string);
   void write(char*, size_t);
   void end();
@@ -207,6 +215,10 @@ std::string camelize(std::string& s) {
   return std::move(s.substr(0, n));
 }
 
+void response_writer::clear_header() {
+  headers.clear();
+}
+
 void response_writer::set_header(std::string key, std::string val) {
   auto h = camelize(key);
   for (auto& hh : headers) {
@@ -215,7 +227,7 @@ void response_writer::set_header(std::string key, std::string val) {
       return;
     }
   }
-  headers.push_back(std::move(std::make_pair(h, val)));
+  headers.emplace_back(std::move(std::make_pair(h, val)));
 }
 
 void response_writer::write(char* buf, size_t n) {
@@ -396,7 +408,7 @@ bool server_t::match(const std::string& method, const std::string& s, std::funct
     bool found = false;
     for (auto vv : n.children) {
       if (vv.placeholder) {
-        args.push_back(std::move(url_decode(sub)));
+        args.emplace_back(std::move(url_decode(sub)));
         n = vv;
         found = true;
         break;
@@ -444,12 +456,12 @@ void server_t::static_dir(std::string path, std::string dir) {
         if (pos == std::string::npos) {
           auto sub = p.substr(1);
           if (sub == "..") paths.pop_back();
-          else paths.push_back(sub);
+          else paths.emplace_back(sub);
           break;
         } else {
           auto sub = p.substr(1, pos-1);
           if (sub == "..") paths.pop_back();
-          else paths.push_back(sub);
+          else paths.emplace_back(sub);
         }
         p = p.substr(pos);
       }
@@ -468,13 +480,42 @@ void server_t::static_dir(std::string path, std::string dir) {
       }
       req_path = dir + "/" + req_path.substr(path.size());
       if (req_path[req_path.size()-1] == '/') req_path += "/index.html";
+
       std::ifstream is(req_path, std::ios::in | std::ios::binary);
       if (is.fail()) {
+        resp.clear_header();
         resp.code = 404;
         resp.set_header("content-type", "text/plain");
         resp.write("Not Found");
         return;
       }
+
+      std::filesystem::path fspath(req_path);
+      std::uintmax_t size = std::filesystem::file_size(fspath);
+      resp.set_header("content-length", std::to_string(size));
+
+      std::filesystem::file_time_type file_time = std::filesystem::last_write_time(req_path);
+      std::time_t tt = to_time_t(file_time);
+      std::tm *gmt = std::gmtime(&tt);
+      for (auto& h : req.headers) {
+        if (h.first == "If-Modified-Since") {
+          std::tm fgmt;
+          std::get_time(&fgmt, h.second.c_str());
+          if (std::mktime(&fgmt) <= std::mktime(gmt)) {
+            resp.clear_header();
+            resp.code = 304;
+            resp.set_header("content-type", "text/plain");
+            resp.write("Not Modified");
+            return;
+          }
+          break;
+        }
+      }
+
+      std::stringstream date;
+      date << std::put_time(gmt, "%a, %d %B %Y %H:%M:%S GMT");
+      resp.set_header("last-modified", date.str());
+
       char buf[BUFSIZ];
       while (!is.eof()) {
         auto size = is.read(buf, sizeof(buf)).gcount();
@@ -596,7 +637,7 @@ retry:
           if (val == "keep-alive")
             keep_alive = true;
         }
-        req_headers.push_back(std::move(std::make_pair(std::move(key), std::move(val))));
+        req_headers.emplace_back(std::move(std::make_pair(std::move(key), std::move(val))));
       }
 
       logger().get(INFO) << req_method << " " << req_path;
