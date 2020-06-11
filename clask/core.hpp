@@ -337,6 +337,8 @@ private:
   node treePOST;
   void parse_tree(node&, const std::string&, func_t);
   bool match(const std::string&, const std::string&, std::function<void(func_t fn, std::vector<std::string>)>);
+  std::string sdir;
+  std::string spath;
 
 public:
   void GET(std::string path, functor_writer fn);
@@ -345,7 +347,7 @@ public:
   void POST(std::string path, functor_string fn);
   void GET(std::string path, functor_response fn);
   void POST(std::string path, functor_response fn);
-  void static_dir(std::string, std::string);
+  void static_dir(const std::string&, const std::string&);
   void run(int);
   logger log;
 };
@@ -446,8 +448,10 @@ CLASK_DEFINE_REQUEST(response);
 
 #undef CLASK_DEFINE_REQUEST
 
-void server_t::static_dir(std::string path, std::string dir) {
-  parse_tree(treeGET, path, func_t {
+void server_t::static_dir(const std::string& path, const std::string& dir) {
+  spath = path;
+  sdir = dir;
+  parse_tree(treeGET, spath, func_t {
     .f_writer = [&](response_writer& resp, request& req) {
       std::vector<std::string> paths;
       std::string p = req.uri;
@@ -471,14 +475,14 @@ void server_t::static_dir(std::string path, std::string dir) {
         os << *it;
       }
       auto req_path = os.str();
-      auto res = std::mismatch(req_path.begin(), req_path.end(), path.begin());
-      if (res.first == path.end()) {
+      auto res = std::mismatch(req_path.begin(), req_path.end(), spath.begin());
+      if (res.first == spath.end()) {
         resp.code = 404;
         resp.set_header("content-type", "text/plain");
         resp.write("Not Found");
         return;
       }
-      req_path = dir + "/" + req_path.substr(path.size());
+      req_path = sdir + "/" + req_path.substr(spath.size());
       if (req_path[req_path.size()-1] == '/') req_path += "/index.html";
 
       std::ifstream is(req_path, std::ios::in | std::ios::binary);
