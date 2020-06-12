@@ -19,8 +19,7 @@
 
 #ifdef _WIN32
 # include <ws2tcpip.h>
-static void
-socket_perror(const char *s) {
+inline static void socket_perror(const char *s) {
   char buf[512];
   FormatMessage(
       FORMAT_MESSAGE_FROM_SYSTEM,
@@ -97,7 +96,7 @@ std::time_t to_time_t(TP tp) {
   return system_clock::to_time_t(sctp);
 }
 
-static std::wstring to_wstring(const std::string& input) {
+inline static std::wstring to_wstring(const std::string& input) {
   try {
     std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
     return converter.from_bytes(input);
@@ -112,7 +111,7 @@ static std::wstring to_wstring(const std::string& input) {
   }
 }
 
-static std::string camelize(std::string& s) {
+inline static std::string camelize(std::string& s) {
   auto n = s.length();
   for (size_t i = 0; i < n; i++) {
     if (i == 0 || s[i - 1] == ' ' || s[i - 1] == '-') {
@@ -123,7 +122,7 @@ static std::string camelize(std::string& s) {
   return std::move(s.substr(0, n));
 }
 
-static void trim_string(std::string& s, const std::string& cutsel = " \t\v\r\n") {
+inline static void trim_string(std::string& s, const std::string& cutsel = " \t\v\r\n") {
   auto left = s.find_first_not_of(cutsel);
   if (left != std::string::npos) {
     auto right = s.find_last_not_of(cutsel);
@@ -131,7 +130,7 @@ static void trim_string(std::string& s, const std::string& cutsel = " \t\v\r\n")
   }
 }
 
-std::string html_encode(const std::string& value) {
+inline std::string html_encode(const std::string& value) {
   std::string buf;
   buf.reserve(value.size());
   for (size_t i = 0; i != value.size(); ++i) {
@@ -147,7 +146,7 @@ std::string html_encode(const std::string& value) {
   return buf;
 }
 
-static std::string url_encode(const std::string &value, bool escape_slash = true) {
+inline static std::string url_encode(const std::string &value, bool escape_slash = true) {
   std::ostringstream os;
   os.fill('0');
   os << std::hex;
@@ -168,7 +167,7 @@ static std::string url_encode(const std::string &value, bool escape_slash = true
   return os.str();
 }
 
-static std::string url_decode(const std::string &s) {
+inline static std::string url_decode(const std::string &s) {
   std::string ret;
   int v;
   for (size_t i = 0; i < s.length(); i++) {
@@ -321,7 +320,7 @@ public:
   friend std::istream & operator >> (std::istream&, response_writer&);
 };
 
-std::unordered_map<std::string, std::string> params(std::string& s) {
+inline std::unordered_map<std::string, std::string> params(std::string& s) {
   std::unordered_map<std::string, std::string> ret;
   std::istringstream iss(s);
   std::string keyval, key, val;
