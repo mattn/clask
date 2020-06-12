@@ -97,7 +97,22 @@ std::time_t to_time_t(TP tp) {
   return system_clock::to_time_t(sctp);
 }
 
-std::string camelize(std::string& s) {
+static std::wstring to_wstring(const std::string& input) {
+  try {
+    std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+    return converter.from_bytes(input);
+  } catch (std::range_error& e) {
+    size_t length = input.length();
+    std::wstring result;
+    result.reserve(length);
+    for (size_t i = 0; i < length; i++) {
+      result.push_back(input[i] & 0xFF);
+    }
+    return result;
+  }
+}
+
+static std::string camelize(std::string& s) {
   int n = s.length();
   for (auto i = 0; i < n; i++) {
     if (i == 0 || s[i - 1] == ' ' || s[i - 1] == '-') {
@@ -114,6 +129,43 @@ static void trim_string(std::string& s, const std::string& cutsel = " \t\v\r\n")
     auto right = s.find_last_not_of(cutsel);
     s = s.substr(left, right - left + 1);
   }
+}
+
+static std::string html_encode(const std::string& value) {
+  std::string buf;
+  buf.reserve(value.size());
+  for(auto i = 0; i != value.size(); ++i) {
+    switch (value[i]) {
+      case '&':  buf.append("&amp;");  break;
+      case '\"': buf.append("&quot;"); break;
+      case '\'': buf.append("&apos;"); break;
+      case '<':  buf.append("&lt;");   break;
+      case '>':  buf.append("&gt;");   break;
+      default:   buf.append(&value[i], 1); break;
+    }
+  }
+  return buf;
+}
+
+static std::string url_encode(const std::string &value, bool escape_slash = true) {
+  std::ostringstream os;
+  os.fill('0');
+  os << std::hex;
+  for (auto i = value.begin(), n = value.end(); i != n; ++i) {
+    std::string::value_type c = (*i);
+    if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
+      os << c;
+      continue;
+    }
+    if (!escape_slash && c == '/') {
+      os << c;
+      continue;
+    }
+    os << std::uppercase;
+    os << '%' << std::setw(2) << int((unsigned char) c);
+    os << std::nouppercase;
+  }
+  return os.str();
 }
 
 static std::string url_decode(const std::string &s) {
@@ -239,6 +291,19 @@ static std::unordered_map<int, std::string> status_codes = {
   { 510, "Not Extended" },
   { 511, "Network Authentication Required" },
 };
+
+static std::unordered_map<std::string, std::string> content_types = {
+  { ".txt",  "text/plain; charset=utf-8" },
+  { ".html", "text/html; charset=utf-8" },
+  { ".js",   "text/javascript" },
+  { ".json", "text/json" },
+  { ".png",  "image/png" },
+  { ".jpg",  "image/jpeg" },
+  { ".jpeg", "image/jpeg" },
+  { ".gif",  "image/gif" },
+  { ".css",  "text/css" },
+};
+
 
 class response_writer {
 private:
@@ -421,7 +486,7 @@ typedef struct {
 } func_t;
 
 int func_t::handle(int s, request& req, bool& keep_alive) const {
-  int status = 200;
+  int code = 200;
   if (f_string != nullptr) {
     auto res = f_string(req);
     std::ostringstream os;
@@ -435,7 +500,7 @@ int func_t::handle(int s, request& req, bool& keep_alive) const {
     response_writer writer(s, 200);
     f_writer(writer, req);
     keep_alive = false;
-    status = writer.code;
+    code = writer.code;
   } else if (f_response != nullptr) {
     auto res = f_response(req);
     std::ostringstream os;
@@ -450,9 +515,9 @@ int func_t::handle(int s, request& req, bool& keep_alive) const {
     auto res_headers = os.str();
     send(s, res_headers.data(), res_headers.size(), 0);
     send(s, res.content.data(), res.content.size(), 0);
-    status = res.code;
+    code = res.code;
   }
-  return status;
+  return code;
 }
 
 typedef struct _node {
@@ -469,7 +534,6 @@ private:
   node treePOST;
   void parse_tree(node&, const std::string&, const func_t);
   bool match(const std::string&, const std::string&, std::function<void(const func_t& fn, const std::vector<std::string>&)>) const;
-  std::pair<std::string, std::string> static_dir_pair;
 
 public:
 #define CLASK_DEFINE_REQUEST(name) \
@@ -479,7 +543,7 @@ void POST(const std::string&, const functor_ ## name);
   CLASK_DEFINE_REQUEST(string)
   CLASK_DEFINE_REQUEST(response)
 #undef CLASK_DEFINE_REQUEST
-  void static_dir(const std::string&, const std::string&);
+  void static_dir(const std::string&, const std::string&, bool listing = false);
   void run(int);
   logger log;
 };
@@ -591,8 +655,34 @@ CLASK_DEFINE_REQUEST(response);
 
 #undef CLASK_DEFINE_REQUEST
 
+void serve_dir(response_writer& resp, request& req, const std::string& path) {
+  auto wpath = to_wstring(path);
+
+  resp.code = 200;
+  resp.set_header("content-type", "text/html; charset=utf-8");
+  std::ostringstream os;
+  os << "<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"UTF-8\">\n<title>";
+  os << html_encode(req.uri);
+  os << "</title>\n</head>\n<body>\n";
+  resp.write(os.str());
+  os.str("");
+  os.clear(std::stringstream::goodbit);
+
+  for (const auto& e : std::filesystem::directory_iterator(wpath)) {
+    auto fn = e.path().filename().u8string();
+    if (e.is_directory()) fn += "/";
+    os << "<a href=\"" << url_encode(fn, false) << "\">" << html_encode(fn) << "</a></br>\n";
+    resp.write(os.str());
+    os.str("");
+    os.clear(std::stringstream::goodbit);
+  }
+  resp.write("</body>\n</html>\n");
+}
+
 void serve_file(response_writer& resp, request& req, const std::string& path) {
-  std::ifstream is(path, std::ios::in | std::ios::binary);
+  auto wpath = to_wstring(path);
+
+  std::ifstream is(wpath.c_str(), std::ios::in | std::ios::binary);
   if (is.fail()) {
     resp.clear_header();
     resp.code = 404;
@@ -601,11 +691,16 @@ void serve_file(response_writer& resp, request& req, const std::string& path) {
     return;
   }
 
-  std::filesystem::path fspath(path);
+  std::filesystem::path fspath(wpath.c_str());
+  auto it = content_types.find(fspath.extension().u8string());
+  if (it != content_types.end()) {
+    resp.set_header("content-type", it->second);
+  }
+
   std::uintmax_t size = std::filesystem::file_size(fspath);
   resp.set_header("content-length", std::to_string(size));
 
-  std::filesystem::file_time_type file_time = std::filesystem::last_write_time(path);
+  std::filesystem::file_time_type file_time = std::filesystem::last_write_time(fspath);
   std::time_t tt = to_time_t(file_time);
   std::tm *gmt = std::gmtime(&tt);
   for (auto& h : req.headers) {
@@ -634,9 +729,9 @@ void serve_file(response_writer& resp, request& req, const std::string& path) {
   }
 }
 
-void server_t::static_dir(const std::string& path, const std::string& dir) {
+void server_t::static_dir(const std::string& path, const std::string& dir, bool listing) {
   parse_tree(treeGET, path, func_t {
-    .f_writer = [path, dir](response_writer& resp, request& req) {
+    .f_writer = [path, dir, listing](response_writer& resp, request& req) {
       std::vector<std::string> paths;
       std::string p = req.uri;
       while (true) {
@@ -666,8 +761,15 @@ void server_t::static_dir(const std::string& path, const std::string& dir) {
         resp.write("Not Found");
         return;
       }
-      req_path = dir + "/" + req_path.substr(path.size());
-      if (req_path[req_path.size() - 1] == '/') req_path += "/index.html";
+      req_path = url_decode(req_path.substr(path.size()));
+      req_path = dir + "/" + req_path;
+      if (req_path[req_path.size() - 1] == '/') {
+        if (listing) {
+          serve_dir(resp, req, req_path);
+          return;
+        }
+        req_path += "index.html";
+      }
 
       serve_file(resp, req, req_path);
     }
@@ -820,12 +922,12 @@ retry:
 
       if (!match(req_method, req_path, [&](const func_t& fn, const std::vector<std::string>& args) {
         req.args = std::move(args);
-        int status = 500;
+        int code = 500;
         try {
-          status = fn.handle(s, req, keep_alive);
-          logger().get(INFO) << status << " " << req_method << " " << req_path;
+          code = fn.handle(s, req, keep_alive);
+          logger().get(INFO) << code << " " << req_method << " " << req_path;
         } catch (std::exception& e) {
-          logger().get(WARN) << status << " " << req_method << " " << req_path;
+          logger().get(WARN) << code << " " << req_method << " " << req_path;
           static const std::string res_content = "HTTP/1.0 500 Internal Server Error\r\nContent-Type: text/plain\r\n\r\nInternal Server Error";
           send(s, res_content.data(), res_content.size(), 0);
         }
