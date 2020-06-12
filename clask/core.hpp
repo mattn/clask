@@ -170,13 +170,13 @@ public:
   response_writer(int s, int code) : s(s), code(code), header_out(false) { }
   void set_header(std::string, std::string);
   void clear_header();
-  void write(std::string);
+  void write(const std::string&);
   void write(char*, size_t);
   void end();
   friend std::istream & operator >> (std::istream&, response_writer&);
 };
 
-static std::string url_decode(std::string &s) {
+static std::string url_decode(const std::string &s) {
   std::string ret;
   int v;
   for (auto i = 0; i < s.length(); i++) {
@@ -234,12 +234,12 @@ void response_writer::write(char* buf, size_t n) {
   write(std::string(buf, n));
 }
 
-void response_writer::write(std::string content) {
+void response_writer::write(const std::string& content) {
   if (!header_out) {
     header_out = true;
     std::ostringstream os;
     os << "HTTP/1.0 " << code << " " << status_codes[code] << "\r\n";
-    std::string res_headers = os.str();
+    auto res_headers = os.str();
     send(s, res_headers.data(), res_headers.size(), 0);
     for (auto& h : headers) {
       auto hh = h.first + ": " + h.second + "\r\n";
@@ -286,17 +286,16 @@ typedef struct {
   functor_writer f_writer;
   functor_string f_string;
   functor_response f_response;
-  void handle(int, request&, bool&);
+  void handle(int, request&, bool&) const;
 } func_t;
 
-void func_t::handle(int s, request& req, bool& keep_alive) {
+void func_t::handle(int s, request& req, bool& keep_alive) const {
   if (f_string != nullptr) {
     auto res = f_string(req);
     std::ostringstream os;
     os << "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=UTF-8\r\n";
     os << "Connection: " << (keep_alive ? "Keep-Alive" : "Close") << "\r\n";
-    os << "Content-Length: " << res.size() << "\r\n";
-    os << "\r\n";
+    os << "Content-Length: " << res.size() << "\r\n\r\n";
     auto res_headers = os.str();
     send(s, res_headers.data(), res_headers.size(), 0);
     send(s, res.data(), res.size(), 0);
@@ -314,9 +313,8 @@ void func_t::handle(int s, request& req, bool& keep_alive) {
         continue;
       os << key + ": " + h.second + "\r\n";
     }
-    os << "Content-Length: " << res.content.size() << "\r\n";
-    os << "\r\n";
-    std::string res_headers = os.str();
+    os << "Content-Length: " << res.content.size() << "\r\n\r\n";
+    auto res_headers = os.str();
     send(s, res_headers.data(), res_headers.size(), 0);
     send(s, res.content.data(), res.content.size(), 0);
   }
@@ -334,23 +332,24 @@ private:
   std::string compiled_tree;
   node treeGET;
   node treePOST;
-  void parse_tree(node&, const std::string&, func_t);
-  bool match(const std::string&, const std::string&, std::function<void(func_t fn, std::vector<std::string>)>);
+  void parse_tree(node&, const std::string&, const func_t);
+  bool match(const std::string&, const std::string&, std::function<void(const func_t& fn, const std::vector<std::string>&)>) const;
   std::pair<std::string, std::string> static_dir_pair;
 
 public:
-  void GET(std::string path, functor_writer fn);
-  void POST(std::string path, functor_writer fn);
-  void GET(std::string path, functor_string fn);
-  void POST(std::string path, functor_string fn);
-  void GET(std::string path, functor_response fn);
-  void POST(std::string path, functor_response fn);
+#define CLASK_DEFINE_REQUEST(name) \
+void GET(const std::string&, const functor_ ## name); \
+void POST(const std::string&, const functor_ ## name);
+  CLASK_DEFINE_REQUEST(writer)
+  CLASK_DEFINE_REQUEST(string)
+  CLASK_DEFINE_REQUEST(response)
+#undef CLASK_DEFINE_REQUEST
   void static_dir(const std::string&, const std::string&);
   void run(int);
   logger log;
 };
 
-void server_t::parse_tree(node& n, const std::string& s, func_t fn) {
+void server_t::parse_tree(node& n, const std::string& s, const func_t fn) {
   auto pos = s.find('/', 1);
   auto placeholder = s[1] == ':';
   if (pos == std::string::npos) {
@@ -363,11 +362,11 @@ void server_t::parse_tree(node& n, const std::string& s, func_t fn) {
       }
     }
     if (!found) {
-      n.children.insert(n.children.begin(), node {
-        .name = sub,
+      n.children.emplace_back(std::move(node {
+        .name = std::move(sub),
         .fn = fn,
         .placeholder = placeholder,
-      });
+      }));
     }
     return;
   }
@@ -383,15 +382,15 @@ void server_t::parse_tree(node& n, const std::string& s, func_t fn) {
   }
   if (!found) {
     node nn = {
-      .name = sub,
+      .name = std::move(sub),
       .placeholder = placeholder,
     };
     parse_tree(nn, s.substr(pos), fn);
-    n.children.insert(n.children.begin(), nn);
+    n.children.emplace_back(std::move(nn));
   }
 }
 
-bool server_t::match(const std::string& method, const std::string& s, std::function<void(func_t fn, std::vector<std::string>)> fn) {
+bool server_t::match(const std::string& method, const std::string& s, std::function<void(const func_t& fn, const std::vector<std::string>&)> fn) const {
   node n = method == "GET" ? treeGET : treePOST;
   std::vector<std::string> args;
   auto ss = s;
@@ -406,7 +405,7 @@ bool server_t::match(const std::string& method, const std::string& s, std::funct
       sub = ss.substr(1, pos-1);
     }
     bool found = false;
-    for (auto vv : n.children) {
+    for (const auto vv : n.children) {
       if (vv.placeholder) {
         args.emplace_back(std::move(url_decode(sub)));
         n = vv;
@@ -422,7 +421,7 @@ bool server_t::match(const std::string& method, const std::string& s, std::funct
       break;
     ss = ss.substr(pos);
     if (ss.empty() || n.children.size() == 0) {
-      fn(n.fn, args);
+      fn(n.fn, std::move(args));
       return true;
     }
   }
@@ -444,10 +443,10 @@ static std::string methodGET = "GET ";
 static std::string methodPOST = "POST ";
 
 #define CLASK_DEFINE_REQUEST(name) \
-void server_t::GET(std::string path, functor_ ## name fn) { \
+void server_t::GET(const std::string& path, functor_ ## name fn) { \
   parse_tree(treeGET, path, func_t { .f_ ## name = fn }); \
 } \
-void server_t::POST(std::string path, functor_ ## name fn) { \
+void server_t::POST(const std::string& path, functor_ ## name fn) { \
   parse_tree(treePOST, path, func_t { .f_ ## name = fn }); \
 }
 
@@ -583,15 +582,6 @@ void server_t::run(int port = 8080) {
     }
 
     std::thread t([&](int s) {
-      //struct timeval tv;
-      //tv.tv_sec = 5;
-      //tv.tv_sec = 0;
-      //if (setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (char*) &tv, (int) sizeof(tv))) {
-      //  socket_perror("setsockopt");
-      //  return;
-      //}
-      //sockopt_t opt = 1;
-
 retry:
       char buf[4096];
       const char *method, *path;
@@ -629,10 +619,10 @@ retry:
         }
       }
 
-      std::string req_method(method, method_len);
+      const std::string req_method(method, method_len);
       std::string req_path(path, path_len);
-      std::string req_body(buf + pret, buflen - pret);
-      std::string req_raw_path = req_path;
+      const std::string req_body(buf + pret, buflen - pret);
+      const std::string req_raw_path = req_path;
       std::unordered_map<std::string, std::string> req_uri_params;
       std::vector<header> req_headers;
 
@@ -667,17 +657,17 @@ retry:
 
       request req(
           req_method,
-          req_raw_path,
+          std::move(req_raw_path),
           req_path,
           std::move(req_uri_params),
           std::move(req_headers),
           std::move(req_body));
 
-      if (!match(req_method, req_path, [&](func_t fn, std::vector<std::string> args) {
-        req.args = args;
+      if (!match(req_method, req_path, [&](const func_t& fn, const std::vector<std::string>& args) {
+        req.args = std::move(args);
         fn.handle(s, req, keep_alive);
       })) {
-        std::string res_content = "HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\n\r\nNot Found";
+        static const std::string res_content = "HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\n\r\nNot Found";
         send(s, res_content.data(), res_content.size(), 0);
       }
 

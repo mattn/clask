@@ -7,7 +7,7 @@ std::string html_escape(inja::Arguments& args) {
   std::string buf;
   buf.reserve(s.size());
   for(auto i = 0; i != s.size(); ++i) {
-    switch(s[i]) {
+    switch (s[i]) {
       case '&':  buf.append("&amp;");  break;
       case '\"': buf.append("&quot;"); break;
       case '\'': buf.append("&apos;"); break;
