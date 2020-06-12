@@ -131,7 +131,7 @@ static void trim_string(std::string& s, const std::string& cutsel = " \t\v\r\n")
   }
 }
 
-static std::string html_encode(const std::string& value) {
+std::string html_encode(const std::string& value) {
   std::string buf;
   buf.reserve(value.size());
   for(auto i = 0; i != value.size(); ++i) {

@@ -2,25 +2,7 @@
 #include <inja.hpp>
 #include <sqlite3.h>
 
-std::string html_escape(inja::Arguments& args) {
-  auto s = args.at(0)->get<std::string>(); // Adapt the index and type of the argument
-  std::string buf;
-  buf.reserve(s.size());
-  for(auto i = 0; i != s.size(); ++i) {
-    switch (s[i]) {
-      case '&':  buf.append("&amp;");  break;
-      case '\"': buf.append("&quot;"); break;
-      case '\'': buf.append("&apos;"); break;
-      case '<':  buf.append("&lt;");   break;
-      case '>':  buf.append("&gt;");   break;
-      default:   buf.append(&s[i], 1); break;
-    }
-  }
-  return buf;
-}
-
-int
-main() {
+int main() {
   sqlite3 *db = nullptr;
   int r = sqlite3_open("bbs.db", &db);
   if (SQLITE_OK != r) {
@@ -29,8 +11,9 @@ main() {
 
   inja::Environment env;
   inja::Template temp = env.parse_template("./index.html");
-  env.add_callback("escape", 1, html_escape);
-
+  env.add_callback("escape", 1, [](inja::Arguments& args) {
+    return clask::html_encode(args.at(0)->get<std::string>());
+  });
   auto s = clask::server();
 
   s.GET("/", [&](clask::request& req) -> clask::response {
