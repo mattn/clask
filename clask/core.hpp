@@ -246,8 +246,8 @@ private:
   int s;
   bool header_out;
 public:
-  int code;
   response_writer(int s, int code) : s(s), header_out(false), code(code) { }
+  int code;
   void set_header(std::string, std::string);
   void clear_header();
   void write(const std::string&);
@@ -591,11 +591,52 @@ CLASK_DEFINE_REQUEST(response);
 
 #undef CLASK_DEFINE_REQUEST
 
-void server_t::static_dir(const std::string& path, const std::string& dir) {
-  static std::string path_ = path, dir_ = dir;
+void serve_file(response_writer& resp, request& req, const std::string& path) {
+  std::ifstream is(path, std::ios::in | std::ios::binary);
+  if (is.fail()) {
+    resp.clear_header();
+    resp.code = 404;
+    resp.set_header("content-type", "text/plain");
+    resp.write("Not Found");
+    return;
+  }
 
+  std::filesystem::path fspath(path);
+  std::uintmax_t size = std::filesystem::file_size(fspath);
+  resp.set_header("content-length", std::to_string(size));
+
+  std::filesystem::file_time_type file_time = std::filesystem::last_write_time(path);
+  std::time_t tt = to_time_t(file_time);
+  std::tm *gmt = std::gmtime(&tt);
+  for (auto& h : req.headers) {
+    if (h.first == "If-Modified-Since") {
+      std::tm fgmt;
+      std::get_time(&fgmt, h.second.c_str());
+      if (std::mktime(&fgmt) <= std::mktime(gmt)) {
+        resp.clear_header();
+        resp.code = 304;
+        resp.set_header("content-type", "text/plain");
+        resp.write("Not Modified");
+        return;
+      }
+      break;
+    }
+  }
+
+  std::stringstream date;
+  date << std::put_time(gmt, "%a, %d %B %Y %H:%M:%S GMT");
+  resp.set_header("last-modified", date.str());
+
+  char buf[BUFSIZ];
+  while (!is.eof()) {
+    auto size = is.read(buf, sizeof(buf)).gcount();
+    resp.write(buf, size);
+  }
+}
+
+void server_t::static_dir(const std::string& path, const std::string& dir) {
   parse_tree(treeGET, path, func_t {
-    .f_writer = [&](response_writer& resp, request& req) {
+    .f_writer = [path, dir](response_writer& resp, request& req) {
       std::vector<std::string> paths;
       std::string p = req.uri;
       while (true) {
@@ -618,56 +659,17 @@ void server_t::static_dir(const std::string& path, const std::string& dir) {
         os << *it;
       }
       auto req_path = os.str();
-      auto res = std::mismatch(req_path.begin(), req_path.end(), path_.begin());
-      if (res.first == path_.end()) {
+      auto res = std::mismatch(req_path.begin(), req_path.end(), path.begin());
+      if (res.first == path.end()) {
         resp.code = 404;
         resp.set_header("content-type", "text/plain");
         resp.write("Not Found");
         return;
       }
-      req_path = dir_ + "/" + req_path.substr(path_.size());
+      req_path = dir + "/" + req_path.substr(path.size());
       if (req_path[req_path.size() - 1] == '/') req_path += "/index.html";
 
-      std::ifstream is(req_path, std::ios::in | std::ios::binary);
-      if (is.fail()) {
-        resp.clear_header();
-        resp.code = 404;
-        resp.set_header("content-type", "text/plain");
-        resp.write("Not Found");
-        return;
-      }
-
-      std::filesystem::path fspath(req_path);
-      std::uintmax_t size = std::filesystem::file_size(fspath);
-      resp.set_header("content-length", std::to_string(size));
-
-      std::filesystem::file_time_type file_time = std::filesystem::last_write_time(req_path);
-      std::time_t tt = to_time_t(file_time);
-      std::tm *gmt = std::gmtime(&tt);
-      for (auto& h : req.headers) {
-        if (h.first == "If-Modified-Since") {
-          std::tm fgmt;
-          std::get_time(&fgmt, h.second.c_str());
-          if (std::mktime(&fgmt) <= std::mktime(gmt)) {
-            resp.clear_header();
-            resp.code = 304;
-            resp.set_header("content-type", "text/plain");
-            resp.write("Not Modified");
-            return;
-          }
-          break;
-        }
-      }
-
-      std::stringstream date;
-      date << std::put_time(gmt, "%a, %d %B %Y %H:%M:%S GMT");
-      resp.set_header("last-modified", date.str());
-
-      char buf[BUFSIZ];
-      while (!is.eof()) {
-        auto size = is.read(buf, sizeof(buf)).gcount();
-        resp.write(buf, size);
-      }
+      serve_file(resp, req, req_path);
     }
   });
 }
