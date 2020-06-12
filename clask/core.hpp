@@ -119,7 +119,7 @@ static void trim_string(std::string& s, const std::string& cutsel = " \t\v\r\n")
 static std::string url_decode(const std::string &s) {
   std::string ret;
   int v;
-  for (auto i = 0; i < s.length(); i++) {
+  for (size_t i = 0; i < s.length(); i++) {
     if (s[i] == '%') {
       std::sscanf(s.substr(i + 1, 2).c_str(), "%x", &v);
       ret += static_cast<char>(v);
@@ -128,7 +128,7 @@ static std::string url_decode(const std::string &s) {
       ret += s[i];
     }
   }
-  return std::move(ret);
+  return ret;
 }
 
 typedef std::pair<std::string, std::string> header;
@@ -243,11 +243,11 @@ static std::unordered_map<int, std::string> status_codes = {
 class response_writer {
 private:
   std::vector<header> headers;
-  bool header_out;
   int s;
+  bool header_out;
 public:
   int code;
-  response_writer(int s, int code) : s(s), code(code), header_out(false) { }
+  response_writer(int s, int code) : s(s), header_out(false), code(code) { }
   void set_header(std::string, std::string);
   void clear_header();
   void write(const std::string&);
@@ -266,7 +266,7 @@ std::unordered_map<std::string, std::string> params(std::string& s) {
       ret[std::move(url_decode(key))] = std::move(url_decode(val));
     }
   }
-  return std::move(ret);
+  return ret;
 }
 
 void response_writer::clear_header() {
@@ -316,13 +316,14 @@ struct response {
 
 struct request {
   std::string method;
-  std::string uri;
   std::string raw_uri;
-  std::vector<header> headers;
+  std::string uri;
   std::unordered_map<std::string, std::string> uri_params;
+  std::vector<header> headers;
   std::string body;
   std::vector<std::string> args;
 
+  request();
   request(
       std::string method, std::string raw_uri, std::string uri,
       std::unordered_map<std::string, std::string> uri_params,
@@ -374,10 +375,9 @@ bool request::parse_multipart(std::vector<part>& parts) {
       return false;
     }
 
-    const std::string req_body(data.data() + pret, data.size() - pret);
     std::vector<header> req_headers;
 
-    for (auto n = 0; n < num_headers; n++) {
+    for (size_t n = 0; n < num_headers; n++) {
       auto key = std::string(headers[n].name, headers[n].name_len);
       auto val = std::string(headers[n].value, headers[n].value_len);
       key = std::move(url_decode(key));
@@ -389,7 +389,7 @@ bool request::parse_multipart(std::vector<part>& parts) {
       .headers = std::move(req_headers),
       .body = data = data.substr(eos + 4)
     };
-    parts.push_back(p);
+    parts.emplace_back(std::move(p));
     pos = next + boundary.size() + 1;
     if (body.at(pos) == '-' && body.at(pos + 1) == '-'
         && body.at(pos + 2) == '\n')
@@ -775,14 +775,16 @@ retry:
       }
 
       bool keep_alive = false;
-      int content_length = -1;
-      for (auto n = 0; n < num_headers; n++) {
+      bool has_content_length = false;
+      size_t content_length = 0;
+      for (size_t n = 0; n < num_headers; n++) {
         auto key = std::string(headers[n].name, headers[n].name_len);
         auto val = std::string(headers[n].value, headers[n].value_len);
         key = std::move(url_decode(key));
         val = std::move(url_decode(val));
         if (key == "Content-Length") {
           content_length = std::stoi(val);
+          has_content_length = true;
         } else if (key == "Connection") {
           for (auto& c : val) c = std::tolower(c);
           if (val == "keep-alive")
@@ -791,7 +793,7 @@ retry:
         req_headers.emplace_back(std::move(std::make_pair(std::move(key), std::move(val))));
       }
 
-      if (content_length >= 0 && buflen - pret < content_length) {
+      if (has_content_length && buflen - pret < content_length) {
         auto rest = content_length - (buflen - pret);
         buflen = 0;
         while (rest > 0) {
