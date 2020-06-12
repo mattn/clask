@@ -97,7 +97,87 @@ std::time_t to_time_t(TP tp) {
   return system_clock::to_time_t(sctp);
 }
 
+std::string camelize(std::string& s) {
+  int n = s.length();
+  for (auto i = 0; i < n; i++) {
+    if (i == 0 || s[i - 1] == ' ' || s[i - 1] == '-') {
+      s[i] = std::toupper(s[i]);
+      continue;
+    }
+  }
+  return std::move(s.substr(0, n));
+}
+
+static void trim_string(std::string& s, const std::string& cutsel = " \t\v\r\n") {
+  auto left = s.find_first_not_of(cutsel);
+  if (left != std::string::npos) {
+    auto right = s.find_last_not_of(cutsel);
+    s = s.substr(left, right - left + 1);
+  }
+}
+
+static std::string url_decode(const std::string &s) {
+  std::string ret;
+  int v;
+  for (auto i = 0; i < s.length(); i++) {
+    if (s[i] == '%') {
+      std::sscanf(s.substr(i + 1, 2).c_str(), "%x", &v);
+      ret += static_cast<char>(v);
+      i += 2;
+    } else {
+      ret += s[i];
+    }
+  }
+  return std::move(ret);
+}
+
 typedef std::pair<std::string, std::string> header;
+typedef std::vector<header> headers;
+
+typedef struct {
+  headers headers;
+  std::string body;
+  std::string header_value(const std::string&);
+  std::string filename();
+} part;
+
+std::string part::filename() {
+  auto cd = header_value("content-disposition");
+  while (!cd.empty()) {
+    auto pos = cd.find(";");
+    if (pos == std::string::npos) {
+      pos = cd.size() - 1;
+    }
+    auto sub = cd.substr(0, pos);
+    trim_string(sub, " \t");
+    if (sub.substr(0, 9) == "filename=") {
+      sub = sub.substr(10);
+      trim_string(sub, "\"");
+      return sub;
+    }
+    if (sub.substr(0, 10) == "filename*=") {
+      sub = sub.substr(11);
+      for (auto& c : sub) c = std::tolower(c);
+      if (sub.substr(0, 7) == "utf-8''") {
+        sub = url_decode(sub.substr(8));
+        trim_string(sub, "\"");
+        return sub;
+      }
+      return sub;
+    }
+    cd = cd.substr(pos + 1);
+  }
+  return "";
+}
+
+std::string part::header_value(const std::string& name) {
+  std::string key = name;
+  camelize(key);
+  for (auto& h : headers) {
+    if (h.first == key) return h.second;
+  }
+  return "";
+}
 
 static std::unordered_map<int, std::string> status_codes = {
   { 100, "Continue" },
@@ -176,21 +256,6 @@ public:
   friend std::istream & operator >> (std::istream&, response_writer&);
 };
 
-static std::string url_decode(const std::string &s) {
-  std::string ret;
-  int v;
-  for (auto i = 0; i < s.length(); i++) {
-    if (s[i] == '%') {
-      std::sscanf(s.substr(i+1,2).c_str(), "%x", &v);
-      ret += static_cast<char>(v);
-      i += 2;
-    } else {
-      ret += s[i];
-    }
-  }
-  return std::move(ret);
-}
-
 std::unordered_map<std::string, std::string> params(std::string& s) {
   std::unordered_map<std::string, std::string> ret;
   std::istringstream iss(s);
@@ -202,17 +267,6 @@ std::unordered_map<std::string, std::string> params(std::string& s) {
     }
   }
   return std::move(ret);
-}
-
-std::string camelize(std::string& s) {
-  int n = s.length();
-  for (auto i = 0; i < n; i++) {
-    if (i == 0 || s[i-1] == ' ' || s[i-1] == '-') {
-      s[i] = std::toupper(s[i]);
-      continue;
-    }
-  }
-  return std::move(s.substr(0, n));
 }
 
 void response_writer::clear_header() {
@@ -276,7 +330,84 @@ struct request {
     : method(method), raw_uri(std::move(raw_uri)),
       uri(std::move(uri)), uri_params(std::move(uri_params)),
       headers(std::move(headers)), body(std::move(body)) { }
+
+  bool parse_multipart(std::vector<part>& parts);
+  std::string header_value(const std::string&);
 };
+
+bool request::parse_multipart(std::vector<part>& parts) {
+  parts.clear();
+
+  auto ct = header_value("content-type");
+  auto pos = ct.find("boundary=");
+  if (pos == std::string::npos) {
+    return false;
+  }
+
+  auto boundary = "\n--" + ct.substr(pos + 9);
+  pos = boundary.find(";");
+  if (pos != std::string::npos) {
+    boundary = boundary.substr(0, pos);
+  }
+
+  pos = 0;
+  while (true) {
+    auto next = body.find(boundary, pos);
+    if (next == std::string::npos) {
+      break;
+    }
+    auto data = body.substr(pos + boundary.size() + 1, next);
+
+    auto eos = data.find("\r\n\r\n");
+    if (eos == std::string::npos)
+      return false;
+    auto lines = data.substr(0, eos + 4);
+
+    struct phr_header headers[100];
+    size_t prevbuflen = 0, num_headers;
+
+    num_headers = sizeof(headers) / sizeof(headers[0]);
+    prevbuflen = 0;
+    auto pret = phr_parse_headers(
+        lines.data(), lines.size(), headers, &num_headers, prevbuflen);
+    if (pret <= 0) {
+      return false;
+    }
+
+    const std::string req_body(data.data() + pret, data.size() - pret);
+    std::vector<header> req_headers;
+
+    for (auto n = 0; n < num_headers; n++) {
+      auto key = std::string(headers[n].name, headers[n].name_len);
+      auto val = std::string(headers[n].value, headers[n].value_len);
+      key = std::move(url_decode(key));
+      val = std::move(url_decode(val));
+      req_headers.emplace_back(std::move(std::make_pair(std::move(key), std::move(val))));
+    }
+
+    part p = {
+      .headers = std::move(req_headers),
+      .body = data = data.substr(eos + 4)
+    };
+    parts.push_back(p);
+    pos = next + boundary.size() + 1;
+    if (body.at(pos) == '-' && body.at(pos + 1) == '-'
+        && body.at(pos + 2) == '\n')
+      break;
+    else if (body.at(pos) != '\n')
+      break;
+  }
+  return true;
+}
+
+std::string request::header_value(const std::string& name) {
+  std::string key = name;
+  camelize(key);
+  for (auto& h : headers) {
+    if (h.first == key) return h.second;
+  }
+  return "";
+}
 
 typedef std::function<void(response_writer&, request&)> functor_writer;
 typedef std::function<std::string(request&)> functor_string;
@@ -286,10 +417,11 @@ typedef struct {
   functor_writer f_writer;
   functor_string f_string;
   functor_response f_response;
-  void handle(int, request&, bool&) const;
+  int handle(int, request&, bool&) const;
 } func_t;
 
-void func_t::handle(int s, request& req, bool& keep_alive) const {
+int func_t::handle(int s, request& req, bool& keep_alive) const {
+  int status = 200;
   if (f_string != nullptr) {
     auto res = f_string(req);
     std::ostringstream os;
@@ -303,6 +435,7 @@ void func_t::handle(int s, request& req, bool& keep_alive) const {
     response_writer writer(s, 200);
     f_writer(writer, req);
     keep_alive = false;
+    status = writer.code;
   } else if (f_response != nullptr) {
     auto res = f_response(req);
     std::ostringstream os;
@@ -317,7 +450,9 @@ void func_t::handle(int s, request& req, bool& keep_alive) const {
     auto res_headers = os.str();
     send(s, res_headers.data(), res_headers.size(), 0);
     send(s, res.content.data(), res.content.size(), 0);
+    status = res.code;
   }
+  return status;
 }
 
 typedef struct _node {
@@ -370,7 +505,7 @@ void server_t::parse_tree(node& n, const std::string& s, const func_t fn) {
     }
     return;
   }
-  auto sub = s.substr(1, pos-1);
+  auto sub = s.substr(1, pos - 1);
   if (placeholder) sub = sub.substr(1);
   bool found = false;
   for (auto& vv : n.children) {
@@ -395,14 +530,14 @@ bool server_t::match(const std::string& method, const std::string& s, std::funct
   std::vector<std::string> args;
   auto ss = s;
   std::string sub;
-  while (1) {
+  while (true) {
     auto pos = ss.find('/', 1);
 
     if (pos == std::string::npos) {
       sub = ss.substr(1);
       pos = ss.size();
     } else {
-      sub = ss.substr(1, pos-1);
+      sub = ss.substr(1, pos - 1);
     }
     bool found = false;
     for (const auto vv : n.children) {
@@ -463,7 +598,7 @@ void server_t::static_dir(const std::string& path, const std::string& dir) {
     .f_writer = [&](response_writer& resp, request& req) {
       std::vector<std::string> paths;
       std::string p = req.uri;
-      while (1) {
+      while (true) {
         auto pos = p.find('/', 1);
         if (pos == std::string::npos) {
           auto sub = p.substr(1);
@@ -471,7 +606,7 @@ void server_t::static_dir(const std::string& path, const std::string& dir) {
           else paths.emplace_back(sub);
           break;
         } else {
-          auto sub = p.substr(1, pos-1);
+          auto sub = p.substr(1, pos - 1);
           if (sub == "..") paths.pop_back();
           else paths.emplace_back(sub);
         }
@@ -491,7 +626,7 @@ void server_t::static_dir(const std::string& path, const std::string& dir) {
         return;
       }
       req_path = dir_ + "/" + req_path.substr(path_.size());
-      if (req_path[req_path.size()-1] == '/') req_path += "/index.html";
+      if (req_path[req_path.size() - 1] == '/') req_path += "/index.html";
 
       std::ifstream is(req_path, std::ios::in | std::ios::binary);
       if (is.fail()) {
@@ -590,7 +725,7 @@ retry:
       size_t buflen = 0, prevbuflen = 0, method_len, path_len, num_headers;
       ssize_t rret;
 
-      while (1) {
+      while (true) {
         while ((rret = recv(s, buf + buflen, sizeof(buf) - buflen, 0)) == -1 && errno == EINTR);
         if (rret <= 0) {
           // IOError
@@ -621,7 +756,7 @@ retry:
 
       const std::string req_method(method, method_len);
       std::string req_path(path, path_len);
-      const std::string req_body(buf + pret, buflen - pret);
+      std::string req_body(buf + pret, buflen - pret);
       const std::string req_raw_path = req_path;
       std::unordered_map<std::string, std::string> req_uri_params;
       std::vector<header> req_headers;
@@ -640,12 +775,15 @@ retry:
       }
 
       bool keep_alive = false;
+      int content_length = -1;
       for (auto n = 0; n < num_headers; n++) {
         auto key = std::string(headers[n].name, headers[n].name_len);
         auto val = std::string(headers[n].value, headers[n].value_len);
         key = std::move(url_decode(key));
         val = std::move(url_decode(val));
-        if (key == "Connection") {
+        if (key == "Content-Length") {
+          content_length = std::stoi(val);
+        } else if (key == "Connection") {
           for (auto& c : val) c = std::tolower(c);
           if (val == "keep-alive")
             keep_alive = true;
@@ -653,7 +791,20 @@ retry:
         req_headers.emplace_back(std::move(std::make_pair(std::move(key), std::move(val))));
       }
 
-      logger().get(INFO) << req_method << " " << req_path;
+      if (content_length >= 0 && buflen - pret < content_length) {
+        auto rest = content_length - (buflen - pret);
+        buflen = 0;
+        while (rest > 0) {
+          while ((rret = recv(s, buf + buflen, sizeof(buf) - buflen, 0)) == -1 && errno == EINTR);
+          if (rret <= 0) {
+            // IOError
+            closesocket(s);
+            return;
+          }
+          req_body.append(buf, rret);
+          rest -= rret;
+        }
+      }
 
       request req(
           req_method,
@@ -665,8 +816,17 @@ retry:
 
       if (!match(req_method, req_path, [&](const func_t& fn, const std::vector<std::string>& args) {
         req.args = std::move(args);
-        fn.handle(s, req, keep_alive);
+        int status = 500;
+        try {
+          status = fn.handle(s, req, keep_alive);
+          logger().get(INFO) << status << " " << req_method << " " << req_path;
+        } catch (std::exception& e) {
+          logger().get(WARN) << status << " " << req_method << " " << req_path;
+          static const std::string res_content = "HTTP/1.0 500 Internal Server Error\r\nContent-Type: text/plain\r\n\r\nInternal Server Error";
+          send(s, res_content.data(), res_content.size(), 0);
+        }
       })) {
+        logger().get(WARN) << 404 << " " << req_method << " " << req_path;
         static const std::string res_content = "HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\n\r\nNot Found";
         send(s, res_content.data(), res_content.size(), 0);
       }
