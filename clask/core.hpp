@@ -113,8 +113,8 @@ static std::wstring to_wstring(const std::string& input) {
 }
 
 static std::string camelize(std::string& s) {
-  int n = s.length();
-  for (auto i = 0; i < n; i++) {
+  auto n = s.length();
+  for (size_t i = 0; i < n; i++) {
     if (i == 0 || s[i - 1] == ' ' || s[i - 1] == '-') {
       s[i] = std::toupper(s[i]);
       continue;
@@ -134,7 +134,7 @@ static void trim_string(std::string& s, const std::string& cutsel = " \t\v\r\n")
 std::string html_encode(const std::string& value) {
   std::string buf;
   buf.reserve(value.size());
-  for(auto i = 0; i != value.size(); ++i) {
+  for (size_t i = 0; i != value.size(); ++i) {
     switch (value[i]) {
       case '&':  buf.append("&amp;");  break;
       case '\"': buf.append("&quot;"); break;
