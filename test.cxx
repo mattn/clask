@@ -17,11 +17,10 @@ void test_clask_params() {
 
   result = clask::params("foo=bar&bar=baz");
   _ok(result.size() == 2, R"(result.size() == 2)");
-  //is("bar", result["foo"]);
-  //is("baz", result["bar"]);
+  _ok(result["foo"] == "bar", R"(result["foo"] == "bar")");
+  _ok(result["bar"] == "baz", R"(result["bar"] == "baz")");
 }
 
-#if 0
 void test_clask_request_parse_multipart1() {
   std::vector<clask::part> parts;
   bool result;
@@ -35,10 +34,10 @@ void test_clask_request_parse_multipart1() {
       {},
       "");
   result = req.parse_multipart(parts);
-  is(false, result);
+  _ok(result == false, R"(result == false)");
 }
 
-TEST(clask, request_parse_multipart2) {
+void test_clask_request_parse_multipart2() {
   std::vector<clask::part> parts;
   bool result;
 
@@ -57,12 +56,12 @@ TEST(clask, request_parse_multipart2) {
       "value1\r\n"
       "--boundary--\r\n");
   result = req.parse_multipart(parts);
-  is(true, result);
-  is(1, parts.size());
-  is("field1", parts[0].name());
+  _ok(result == true, R"(result == true)");
+  _ok(parts.size() == 1, R"(parts.size( == 1)");
+  _ok(parts[0].name() == "field1", R"(parts[0].name( == "field1")");
 }
 
-TEST(clask, request_parse_multipart3) {
+void test_clask_request_parse_multipart3() {
   std::vector<clask::part> parts;
   bool result;
 
@@ -81,13 +80,13 @@ TEST(clask, request_parse_multipart3) {
       "value1\r\n"
       "--boundary--\r\n");
   result = req.parse_multipart(parts);
-  is(true, result);
-  is(1, parts.size());
-  is("field1", parts[0].name());
-  is("README.md", parts[0].filename());
+  _ok(result == true, R"(result == true)");
+  _ok(parts.size() == 1, R"(parts.size( == 1)");
+  _ok(parts[0].name() == "field1", R"(parts[0].name( == "field1")");
+  _ok(parts[0].filename() == "README.md", R"(parts[0].filename( == "README.md")");
 }
 
-TEST(clask, request_parse_multipart4) {
+void test_clask_request_parse_multipart4() {
   std::vector<clask::part> parts;
   bool result;
 
@@ -106,13 +105,16 @@ TEST(clask, request_parse_multipart4) {
       "value1\r\n"
       "--boundary--\r\n");
   result = req.parse_multipart(parts);
-  is(true, result);
-  is(1, parts.size());
-  is("", parts[0].name());
-  is("README.md name=\"field1", parts[0].filename());
+  _ok(result == true, R"(result == true)");
+  _ok(parts.size() == 1, R"(parts.size( == 1)");
+  _ok(parts[0].name() == "", R"(parts[0].name( == "")");
+  _ok(parts[0].filename() == "README.md name=\"field1", R"(parts[0].filename( == "README.md name=\"field1")");
 }
-#endif
 
 int main() {
-  test_clask_params();
+  subtest("test_clask_params", test_clask_params);
+  subtest("test_clask_request_parse_multipart1", test_clask_request_parse_multipart1);
+  subtest("test_clask_request_parse_multipart2", test_clask_request_parse_multipart2);
+  subtest("test_clask_request_parse_multipart3", test_clask_request_parse_multipart3);
+  subtest("test_clask_request_parse_multipart4", test_clask_request_parse_multipart4);
 }
