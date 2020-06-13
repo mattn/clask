@@ -722,8 +722,9 @@ void serve_dir(response_writer& resp, request& req, const std::string& path) {
 
 void serve_file(response_writer& resp, request& req, const std::string& path) {
   auto wpath = to_wstring(path);
+  std::filesystem::path fspath(wpath.c_str());
 
-  std::ifstream is(wpath.c_str(), std::ios::in | std::ios::binary);
+  std::ifstream is(fspath, std::ios::in | std::ios::binary);
   if (is.fail()) {
     resp.clear_header();
     resp.code = 404;
@@ -732,7 +733,6 @@ void serve_file(response_writer& resp, request& req, const std::string& path) {
     return;
   }
 
-  std::filesystem::path fspath(wpath.c_str());
   auto it = content_types.find(fspath.extension().u8string());
   if (it != content_types.end()) {
     resp.set_header("content-type", it->second);
