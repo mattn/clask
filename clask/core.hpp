@@ -190,14 +190,34 @@ typedef struct {
   std::string body;
   std::string header_value(const std::string&);
   std::string filename();
+  std::string name();
 } part;
+
+std::string part::name() {
+  auto cd = header_value("content-disposition");
+  while (!cd.empty()) {
+    auto pos = cd.find(";");
+    if (pos == std::string::npos) {
+      pos = cd.size();
+    }
+    auto sub = cd.substr(0, pos);
+    trim_string(sub, " \t");
+    if (sub.substr(0, 5) == "name=") {
+      sub = sub.substr(6);
+      trim_string(sub, "\"");
+      return sub;
+    }
+    cd = cd.substr(pos + 1);
+  }
+  return "";
+}
 
 std::string part::filename() {
   auto cd = header_value("content-disposition");
   while (!cd.empty()) {
     auto pos = cd.find(";");
     if (pos == std::string::npos) {
-      pos = cd.size() - 1;
+      pos = cd.size();
     }
     auto sub = cd.substr(0, pos);
     trim_string(sub, " \t");
@@ -316,6 +336,7 @@ public:
   void clear_header();
   void write(const std::string&);
   void write(char*, size_t);
+  void write_headers();
   void end();
   friend std::istream & operator >> (std::istream&, response_writer&);
 };
@@ -352,23 +373,30 @@ void response_writer::write(char* buf, size_t n) {
   write(std::string(buf, n));
 }
 
+void response_writer::write_headers() {
+  header_out = true;
+  std::ostringstream os;
+  os << "HTTP/1.0 " << code << " " << status_codes[code] << "\r\n";
+  auto res_headers = os.str();
+  send(s, res_headers.data(), res_headers.size(), 0);
+  for (auto& h : headers) {
+    auto hh = h.first + ": " + h.second + "\r\n";
+    send(s, hh.data(), hh.size(), 0);
+  }
+  send(s, "\r\n", 2, 0);
+}
+
 void response_writer::write(const std::string& content) {
   if (!header_out) {
-    header_out = true;
-    std::ostringstream os;
-    os << "HTTP/1.0 " << code << " " << status_codes[code] << "\r\n";
-    auto res_headers = os.str();
-    send(s, res_headers.data(), res_headers.size(), 0);
-    for (auto& h : headers) {
-      auto hh = h.first + ": " + h.second + "\r\n";
-      send(s, hh.data(), hh.size(), 0);
-    }
-    send(s, "\r\n", 2, 0);
+    write_headers();
   }
   send(s, content.data(), content.size(), 0);
 }
 
 void response_writer::end() {
+  if (!header_out) {
+    write_headers();
+  }
   closesocket(s);
 }
 
@@ -387,7 +415,6 @@ struct request {
   std::string body;
   std::vector<std::string> args;
 
-  request();
   request(
       std::string method, std::string raw_uri, std::string uri,
       std::unordered_map<std::string, std::string> uri_params,
@@ -404,22 +431,38 @@ bool request::parse_multipart(std::vector<part>& parts) {
   parts.clear();
 
   auto ct = header_value("content-type");
-  auto pos = ct.find("boundary=");
-  if (pos == std::string::npos) {
+  std::string boundary;
+  while (!ct.empty()) {
+    auto pos = ct.find(";");
+    if (pos == std::string::npos) {
+      pos = ct.size() - 1;
+    }
+    auto sub = ct.substr(0, pos);
+    trim_string(sub, " \t");
+    if (sub.substr(0, 9) == "boundary=") {
+      sub = sub.substr(9);
+      trim_string(sub, "\"");
+      boundary = sub;
+      break;
+    }
+    ct = ct.substr(pos + 1);
+  }
+  if (boundary.empty()) {
     return false;
   }
+  boundary = "--" + boundary;
 
-  auto boundary = "\n--" + ct.substr(pos + 9);
-  pos = boundary.find(";");
-  if (pos != std::string::npos) {
-    boundary = boundary.substr(0, pos);
-  }
-
-  pos = 0;
+  size_t pos = 0;
   while (true) {
-    auto next = body.find(boundary, pos);
+    auto next = body.find(boundary + "\r\n", pos + 1);
     if (next == std::string::npos) {
-      break;
+      next = body.find(boundary + "--\r\n", pos + 1);
+      if (next == std::string::npos) {
+        break;
+      }
+      boundary += 4;
+    } else {
+      boundary += 2;
     }
     auto data = body.substr(pos + boundary.size() + 1, next);
 
