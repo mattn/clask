@@ -31,6 +31,6 @@ $(TARGET) : $(OBJS)
 clean :
 	rm -f *.o $(TARGET)
 
-test :
-	g++ -std=c++17 -I. -o clask_test test.cxx -lgtest -lgtest_main $(LIBS)
+test : $(OBJS)
+	$(CXX) -std=c++17 -I. -o clask_test test.cxx -lgtest -lgtest_main $(LIBS)
 	./clask_test
