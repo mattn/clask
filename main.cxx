@@ -40,6 +40,6 @@ int main() {
       },
     };
   });
-  s.static_dir("/static/", "./public");
+  s.static_dir("/static/", "./public", true);
   s.run();
 }
