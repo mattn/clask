@@ -9,7 +9,7 @@ LIBS = -std=c++17 -O2 -Lc:/msys64/mingw64/lib -Lc:/msys64/mingw64/x86_64-w64-min
 TARGET = main.exe
 else
 CXXFLAGS = -std=c++17 -Wall -O2 -I.
-LIBS = -lstdc++fs
+LIBS = -lstdc++fs -lpthread
 TARGET = main
 endif
 
