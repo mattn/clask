@@ -23,17 +23,14 @@ $(TARGET) : $(OBJS)
 	$(CXX) -o $@ $(OBJS) $(LIBS)
 
 .cxx.o :
-	$(CXX) -c $(CXXFLAGS) -I. $< -o $@
-
-.cpp.o :
-	$(CXX) -c $(CXXFLAGS) -I. $< -o $@
+	$(CXX) -c $(CXXFLAGS) $< -o $@
 
 .c.o :
-	$(CC) -c $(CXXFLAGS) -I. $< -o $@
+	$(CC) -c $(CXXFLAGS) $< -o $@
 
 clean :
 	rm -f *.o $(TARGET)
 
-test : $(OBJS)
+test :
 	g++ -std=c++17 -I. -o clask_test test.cxx -lgtest -lgtest_main $(LIBS)
 	./clask_test
