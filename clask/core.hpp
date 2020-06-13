@@ -183,10 +183,9 @@ inline static std::string url_decode(const std::string &s) {
 }
 
 typedef std::pair<std::string, std::string> header;
-typedef std::vector<header> headers;
 
 typedef struct {
-  headers headers;
+  std::vector<header> headers;
   std::string body;
   std::string header_value(const std::string&);
   std::string filename();
