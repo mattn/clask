@@ -31,6 +31,9 @@ $(TARGET) : $(OBJS)
 clean :
 	rm -f *.o $(TARGET)
 
-test : $(OBJS)
-	$(CXX) -std=c++17 -I. -o clask_test test.cxx -lgtest -lgtest_main $(LIBS)
+test : picotest
+	$(CXX) -std=c++17 -I. -Ipicotest -o clask_test test.cxx picotest/picotest.c $(LIBS)
 	./clask_test
+
+picotest :
+	git clone https://github.com/h2o/picotest
