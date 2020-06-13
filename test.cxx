@@ -57,8 +57,8 @@ void test_clask_request_parse_multipart2() {
       "--boundary--\r\n");
   result = req.parse_multipart(parts);
   _ok(result == true, R"(result == true)");
-  _ok(parts.size() == 1, R"(parts.size( == 1)");
-  _ok(parts[0].name() == "field1", R"(parts[0].name( == "field1")");
+  _ok(parts.size() == 1, R"(parts.size() == 1)");
+  _ok(parts[0].name() == "field1", R"(parts[0].name() == "field1")");
 }
 
 void test_clask_request_parse_multipart3() {
@@ -81,9 +81,9 @@ void test_clask_request_parse_multipart3() {
       "--boundary--\r\n");
   result = req.parse_multipart(parts);
   _ok(result == true, R"(result == true)");
-  _ok(parts.size() == 1, R"(parts.size( == 1)");
-  _ok(parts[0].name() == "field1", R"(parts[0].name( == "field1")");
-  _ok(parts[0].filename() == "README.md", R"(parts[0].filename( == "README.md")");
+  _ok(parts.size() == 1, R"(parts.size() == 1)");
+  _ok(parts[0].name() == "field1", R"(parts[0].name() == "field1")");
+  _ok(parts[0].filename() == "README.md", R"(parts[0].filename() == "README.md")");
 }
 
 void test_clask_request_parse_multipart4() {
@@ -106,9 +106,9 @@ void test_clask_request_parse_multipart4() {
       "--boundary--\r\n");
   result = req.parse_multipart(parts);
   _ok(result == true, R"(result == true)");
-  _ok(parts.size() == 1, R"(parts.size( == 1)");
-  _ok(parts[0].name() == "", R"(parts[0].name( == "")");
-  _ok(parts[0].filename() == "README.md name=\"field1", R"(parts[0].filename( == "README.md name=\"field1")");
+  _ok(parts.size() == 1, R"(parts.size() == 1)");
+  _ok(parts[0].name() == "", R"(parts[0].name() == "")");
+  _ok(parts[0].filename() == "README.md name=\"field1", R"(parts[0].filename() == "README.md name=\"field1")");
 }
 
 int main() {
