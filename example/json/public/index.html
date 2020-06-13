@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>demo</title>
+<script>
+window.addEventListener('DOMContentLoaded', function() {
+ fetch('/api').then(function(resp) {
+    return resp.json();
+  }).then(function(json) {
+    let dom = document.querySelector('#container');
+    for (let item of json.user) {
+      let e = document.createElement('li');
+      e.textContent = item.name;
+      dom.appendChild(e);
+    }
+  }); 
+}, false)
+</script>
+</head>
+<body>
+  <ul id="container"></ul>
+</body>
+</html>

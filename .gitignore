@@ -3,3 +3,4 @@ main.exe
 main
 *.db
 *.sqlite
+picotest/
