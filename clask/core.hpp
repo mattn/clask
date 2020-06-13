@@ -320,7 +320,7 @@ public:
   friend std::istream & operator >> (std::istream&, response_writer&);
 };
 
-inline std::unordered_map<std::string, std::string> params(std::string& s) {
+inline std::unordered_map<std::string, std::string> params(const std::string& s) {
   std::unordered_map<std::string, std::string> ret;
   std::istringstream iss(s);
   std::string keyval, key, val;

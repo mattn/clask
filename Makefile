@@ -13,6 +13,8 @@ LIBS =
 TARGET = main
 endif
 
+.PHONY: test
+
 .SUFFIXES: .cxx .hpp .c .o
 
 all : $(TARGET)
@@ -32,3 +34,6 @@ $(TARGET) : $(OBJS)
 clean :
 	rm -f *.o $(TARGET)
 
+test : $(OBJS)
+	g++ -std=c++17 -I. -o clask_test test.cxx -lgtest -lgtest_main $(LIBS)
+	./clask_test
