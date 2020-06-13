@@ -21,7 +21,7 @@ TEST(clask, params) {
   ASSERT_EQ("baz", result["bar"]);
 }
 
-TEST(clask, request_parse_multipart) {
+TEST(clask, request_parse_multipart1) {
   std::vector<clask::part> parts;
   bool result;
 
@@ -59,4 +59,54 @@ TEST(clask, request_parse_multipart2) {
   ASSERT_EQ(true, result);
   ASSERT_EQ(1, parts.size());
   ASSERT_EQ("field1", parts[0].name());
+}
+
+TEST(clask, request_parse_multipart3) {
+  std::vector<clask::part> parts;
+  bool result;
+
+  parts.clear();
+  clask::request req(
+      "GET",
+      "/",
+      "/",
+      {},
+      {
+        { "Content-Type", R"(multipart/form-data;boundary="boundary")" },
+      },
+      "--boundary\r\n"
+      "Content-Disposition: form-data; filename=README.md; name=\"field1\"\r\n"
+      "\r\n"
+      "value1\r\n"
+      "--boundary--\r\n");
+  result = req.parse_multipart(parts);
+  ASSERT_EQ(true, result);
+  ASSERT_EQ(1, parts.size());
+  ASSERT_EQ("field1", parts[0].name());
+  ASSERT_EQ("README.md", parts[0].filename());
+}
+
+TEST(clask, request_parse_multipart4) {
+  std::vector<clask::part> parts;
+  bool result;
+
+  parts.clear();
+  clask::request req(
+      "GET",
+      "/",
+      "/",
+      {},
+      {
+        { "Content-Type", R"(multipart/form-data;boundary="boundary")" },
+      },
+      "--boundary\r\n"
+      "Content-Disposition: form-data; filename=README.md name=\"field1\"\r\n"
+      "\r\n"
+      "value1\r\n"
+      "--boundary--\r\n");
+  result = req.parse_multipart(parts);
+  ASSERT_EQ(true, result);
+  ASSERT_EQ(1, parts.size());
+  ASSERT_EQ("", parts[0].name());
+  ASSERT_EQ("README.md name=\"field1", parts[0].filename());
 }

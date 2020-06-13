@@ -198,12 +198,12 @@ std::string part::name() {
   while (!cd.empty()) {
     auto pos = cd.find(";");
     if (pos == std::string::npos) {
-      pos = cd.size();
+      pos = cd.size() - 1;
     }
     auto sub = cd.substr(0, pos);
     trim_string(sub, " \t");
     if (sub.substr(0, 5) == "name=") {
-      sub = sub.substr(6);
+      sub = sub.substr(5);
       trim_string(sub, "\"");
       return sub;
     }
@@ -217,20 +217,20 @@ std::string part::filename() {
   while (!cd.empty()) {
     auto pos = cd.find(";");
     if (pos == std::string::npos) {
-      pos = cd.size();
+      pos = cd.size() - 1;
     }
     auto sub = cd.substr(0, pos);
     trim_string(sub, " \t");
     if (sub.substr(0, 9) == "filename=") {
-      sub = sub.substr(10);
+      sub = sub.substr(9);
       trim_string(sub, "\"");
       return sub;
     }
     if (sub.substr(0, 10) == "filename*=") {
-      sub = sub.substr(11);
+      sub = sub.substr(10);
       for (auto& c : sub) c = std::tolower(c);
       if (sub.substr(0, 7) == "utf-8''") {
-        sub = url_decode(sub.substr(8));
+        sub = url_decode(sub.substr(7));
         trim_string(sub, "\"");
         return sub;
       }
