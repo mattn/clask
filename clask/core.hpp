@@ -96,7 +96,7 @@ std::time_t to_time_t(TP tp) {
   return system_clock::to_time_t(sctp);
 }
 
-inline static std::wstring to_wstring(const std::string& input) {
+inline std::wstring to_wstring(const std::string& input) {
   try {
     std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
     return converter.from_bytes(input);
@@ -111,7 +111,7 @@ inline static std::wstring to_wstring(const std::string& input) {
   }
 }
 
-inline static std::string camelize(std::string& s) {
+inline std::string camelize(std::string& s) {
   auto n = s.length();
   for (size_t i = 0; i < n; i++) {
     if (i == 0 || s[i - 1] == ' ' || s[i - 1] == '-') {
@@ -122,7 +122,7 @@ inline static std::string camelize(std::string& s) {
   return std::move(s.substr(0, n));
 }
 
-inline static void trim_string(std::string& s, const std::string& cutsel = " \t\v\r\n") {
+inline void trim_string(std::string& s, const std::string& cutsel = " \t\v\r\n") {
   auto left = s.find_first_not_of(cutsel);
   if (left != std::string::npos) {
     auto right = s.find_last_not_of(cutsel);
@@ -146,7 +146,7 @@ inline std::string html_encode(const std::string& value) {
   return buf;
 }
 
-inline static std::string url_encode(const std::string &value, bool escape_slash = true) {
+inline std::string url_encode(const std::string &value, bool escape_slash = true) {
   std::ostringstream os;
   os.fill('0');
   os << std::hex;
@@ -167,7 +167,7 @@ inline static std::string url_encode(const std::string &value, bool escape_slash
   return os.str();
 }
 
-inline static std::string url_decode(const std::string &s) {
+inline std::string url_decode(const std::string &s) {
   std::string ret;
   int v;
   for (size_t i = 0; i < s.length(); i++) {
