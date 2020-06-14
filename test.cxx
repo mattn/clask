@@ -111,10 +111,15 @@ void test_clask_request_parse_multipart4() {
   _ok(parts[0].filename() == "README.md name=\"field1", R"(parts[0].filename() == "README.md name=\"field1")");
 }
 
+void test_clask_to_wstring() {
+  _ok(clask::to_wstring("あいうえお") == L"あいうえお", R"(clask::to_wstring("あいうえお") == L"あいうえお")");
+}
+
 int main() {
   subtest("test_clask_params", test_clask_params);
   subtest("test_clask_request_parse_multipart1", test_clask_request_parse_multipart1);
   subtest("test_clask_request_parse_multipart2", test_clask_request_parse_multipart2);
   subtest("test_clask_request_parse_multipart3", test_clask_request_parse_multipart3);
   subtest("test_clask_request_parse_multipart4", test_clask_request_parse_multipart4);
+  subtest("test_clask_to_wstring", test_clask_to_wstring);
 }
