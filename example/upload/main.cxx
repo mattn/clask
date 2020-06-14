@@ -4,7 +4,7 @@ static void save_file(clask::part p) {
   auto filename = p.filename();
   if (filename.empty()) return;
   std::filesystem::path fn(clask::to_wstring(filename));
-  fn = L"download/" + fn.filename().wstring();
+  fn = L"files/" + fn.filename().wstring();
   std::ofstream out(fn, std::ios::out | std::ios::binary);
   out << p.body;
   out.close();
@@ -16,7 +16,7 @@ int main() {
   s.static_dir("/", "./public");
   s.POST("/upload", [](clask::request& req) -> clask::response {
     std::vector<clask::part> parts;
-    if (!req.parse_multipart(parts)) {
+    if (!req.parse_multipart(parts) || parts.size() == 0) {
       return clask::response {
         .code = 400,
         .content = "Bad Request",

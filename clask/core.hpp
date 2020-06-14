@@ -240,7 +240,7 @@ std::string part::filename() {
   return "";
 }
 
-std::string part::header_value(const std::string& name) {
+inline std::string part::header_value(const std::string& name) {
   std::string key = name;
   camelize(key);
   for (auto& h : headers) {
@@ -434,7 +434,7 @@ bool request::parse_multipart(std::vector<part>& parts) {
   while (!ct.empty()) {
     auto pos = ct.find(";");
     if (pos == std::string::npos) {
-      pos = ct.size() - 1;
+      pos = ct.size();
     }
     auto sub = ct.substr(0, pos);
     trim_string(sub, " \t");
@@ -463,11 +463,13 @@ bool request::parse_multipart(std::vector<part>& parts) {
     } else {
       boundary += 2;
     }
+
     auto data = body.substr(pos + boundary.size() + 1, next);
 
     auto eos = data.find("\r\n\r\n");
-    if (eos == std::string::npos)
+    if (eos == std::string::npos) {
       return false;
+    }
     auto lines = data.substr(0, eos + 4);
 
     struct phr_header headers[100];
@@ -498,15 +500,16 @@ bool request::parse_multipart(std::vector<part>& parts) {
     parts.emplace_back(std::move(p));
     pos = next + boundary.size() + 1;
     if (body.at(pos) == '-' && body.at(pos + 1) == '-'
-        && body.at(pos + 2) == '\n')
+        && body.at(pos + 2) == '\n') {
       break;
-    else if (body.at(pos) != '\n')
+    } else if (body.at(pos) != '\n') {
       break;
+    }
   }
   return true;
 }
 
-std::string request::header_value(const std::string& name) {
+inline std::string request::header_value(const std::string& name) {
   std::string key = name;
   camelize(key);
   for (auto& h : headers) {
@@ -932,8 +935,7 @@ retry:
       for (size_t n = 0; n < num_headers; n++) {
         auto key = std::string(headers[n].name, headers[n].name_len);
         auto val = std::string(headers[n].value, headers[n].value_len);
-        key = std::move(url_decode(key));
-        val = std::move(url_decode(val));
+        camelize(key);
         if (key == "Content-Length") {
           content_length = std::stoi(val);
           has_content_length = true;

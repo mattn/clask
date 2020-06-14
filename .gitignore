@@ -4,3 +4,4 @@ main
 *.db
 *.sqlite
 picotest/
+example/upload/files
