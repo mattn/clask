@@ -3,11 +3,29 @@
 <head>
   <meta charset="UTF-8">
   <title>demo</title>
+<script>
+window.addEventListener('DOMContentLoaded', function() {
+ fetch('/api').then(function(resp) {
+    return resp.json();
+  }).then(function(json) {
+    let dom = document.querySelector('#container');
+    for (let item of json) {
+      let e = document.createElement('li');
+      let a = document.createElement('a');
+      a.href = '/files/' + item;
+      a.textContent = item;
+      e.appendChild(a);
+      dom.appendChild(e);
+    }
+  });
+}, false);
+</script>
 </head>
 <body>
   <form action="/upload" method="post" enctype="multipart/form-data">
     <input type="file" name="image"><br>
-    <input type="submit">
+    <input type="submit"><br>
+    <ul id="container"></ul>
   </form>
 </body>
 </html>
