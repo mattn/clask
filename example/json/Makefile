@@ -4,12 +4,12 @@ SRCS = \
 OBJS = $(subst .c,.o,$(subst .cc,.o,$(subst .cxx,.o,$(SRCS))))
 
 ifeq ($(OS), Windows_NT)
-CXXFLAGS = -I../.. -I. -O2
-LIBS = -O2 -lws2_32
+CXXFLAGS = -std=c++17 -I../.. -I. -Wall -O2
+LIBS = -lws2_32
 TARGET = main.exe
 else
-CXXFLAGS = -I../.. -I. -O2
-LIBS = -O2
+CXXFLAGS = -std=c++17 -I../.. -I. -Wall -O2
+LIBS = -lstdc++fs -lpthread
 TARGET = main
 endif
 
