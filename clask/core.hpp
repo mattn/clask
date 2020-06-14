@@ -575,6 +575,7 @@ private:
   node treePOST;
   void parse_tree(node&, const std::string&, const func_t);
   bool match(const std::string&, const std::string&, std::function<void(const func_t& fn, const std::vector<std::string>&)>) const;
+  void run(const std::string&, int);
 
 public:
 #define CLASK_DEFINE_REQUEST(name) \
@@ -585,6 +586,7 @@ void POST(const std::string&, const functor_ ## name);
   CLASK_DEFINE_REQUEST(response)
 #undef CLASK_DEFINE_REQUEST
   void static_dir(const std::string&, const std::string&, bool listing = false);
+  void run(const std::string&);
   void run(int);
   logger log;
 };
@@ -817,7 +819,7 @@ void server_t::static_dir(const std::string& path, const std::string& dir, bool 
   });
 }
 
-void server_t::run(int port = 8080) {
+void server_t::run(const std::string& host, int port = 8080) {
   int server_fd, s;
   struct sockaddr_in address;
   sockopt_t opt = 1;
@@ -846,7 +848,12 @@ void server_t::run(int port = 8080) {
     throw std::runtime_error("setsockopt");
   }
   address.sin_family = AF_INET;
-  address.sin_addr.s_addr = INADDR_ANY;
+  if (host.empty())
+    address.sin_addr.s_addr = htonl(INADDR_ANY);
+  else {
+    auto info = gethostbyname(host.c_str());
+    address.sin_addr = *(struct in_addr *)(info->h_addr_list[0]);
+  }
   address.sin_port = htons(port);
 
   if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
@@ -907,7 +914,7 @@ retry:
       std::vector<header> req_headers;
 
       auto pos = req_path.find('?');
-      if (pos != req_path.npos) {
+      if (pos != std::string::npos) {
         req_path.resize(pos);
         std::istringstream iss(req_raw_path);
         std::string keyval, key, val;
@@ -984,6 +991,20 @@ retry:
     }, s);
     t.detach();
   }
+}
+
+void server_t::run(const std::string& addr) {
+  auto pos = addr.find_last_of(':');
+  if (pos == std::string::npos) {
+    throw std::runtime_error("invalid host:port");
+  }
+  auto host = addr.substr(0, pos - 1);
+  auto port = std::stoi(addr.substr(pos + 1));
+  run(host, port);
+}
+
+void server_t::run(int port = 8080) {
+  run("", port);
 }
 
 server_t server() { return server_t{}; }
