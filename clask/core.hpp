@@ -38,6 +38,7 @@ typedef char sockopt_t;
 # include <sys/types.h>
 # include <sys/socket.h>
 # include <netinet/in.h>
+# include <arpa/inet.h>
 # include <netdb.h>
 #define closesocket(fd) close(fd)
 #define socket_perror(s) perror(s)
@@ -871,7 +872,7 @@ void server_t::run(const std::string& host, int port = 8080) {
       throw std::runtime_error("accept");
     }
 
-    std::thread t([&](int s) {
+    std::thread t([&](int s, const std::string& remote) {
 retry:
       char buf[4096];
       const char *method, *path;
@@ -975,14 +976,14 @@ retry:
         int code = 500;
         try {
           code = fn.handle(s, req, keep_alive);
-          logger().get(INFO) << code << " " << req_method << " " << req_path;
+          logger().get(INFO) << remote << " " << code << " " << req_method << " " << req_path;
         } catch (std::exception& e) {
-          logger().get(WARN) << code << " " << req_method << " " << req_path;
+          logger().get(WARN) << remote << " " << code << " " << req_method << " " << req_path;
           static const std::string res_content = "HTTP/1.0 500 Internal Server Error\r\nContent-Type: text/plain\r\n\r\nInternal Server Error";
           send(s, res_content.data(), res_content.size(), 0);
         }
       })) {
-        logger().get(WARN) << 404 << " " << req_method << " " << req_path;
+        logger().get(WARN) << remote << " " << 404 << " " << req_method << " " << req_path;
         static const std::string res_content = "HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\n\r\nNot Found";
         send(s, res_content.data(), res_content.size(), 0);
       }
@@ -990,7 +991,7 @@ retry:
       if (keep_alive)
         goto retry;
       closesocket(s);
-    }, s);
+    }, s, (std::string) inet_ntoa(address.sin_addr));
     t.detach();
   }
 }
