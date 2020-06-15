@@ -5,3 +5,4 @@ main
 *.sqlite
 picotest/
 example/upload/files
+clask_test
