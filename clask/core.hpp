@@ -131,6 +131,18 @@ inline void trim_string(std::string& s, const std::string& cutsel = " \t\v\r\n")
   }
 }
 
+inline std::vector<std::string> split_string(const std::string &s, char delim, size_t max_elems = -1) {
+  std::vector<std::string> elems;
+  std::stringstream ss(s);
+  std::string item;
+  while (getline(ss, item, delim)) {
+    if (!item.empty() && elems.size() < max_elems) {
+      elems.push_back(item);
+    }
+  }
+  return elems;
+}
+
 inline std::string html_encode(const std::string& value) {
   std::string buf;
   buf.reserve(value.size());
@@ -425,6 +437,7 @@ struct request {
 
   bool parse_multipart(std::vector<part>& parts);
   std::string header_value(const std::string&);
+  std::string cookie_value(const std::string&);
 };
 
 bool request::parse_multipart(std::vector<part>& parts) {
@@ -515,6 +528,34 @@ inline std::string request::header_value(const std::string& name) {
   camelize(key);
   for (auto& h : headers) {
     if (h.first == key) return h.second;
+  }
+  return "";
+}
+
+inline std::string request::cookie_value(const std::string& name) {
+  std::string value, path;
+  for (auto& header : headers) {
+    if (header.first == "Cookie") {
+      auto elems = split_string(header.second, ';');
+      auto found = false;
+      for (auto& elem : elems) {
+        auto v = elem;
+        trim_string(v);
+        auto toks = split_string(v, '=');
+        if (toks.size() == 2 && toks[0] == name) {
+          value = toks[1];
+          found = true;
+        }
+        if (toks.size() == 2 && toks[0] == "path") {
+          path = toks[1];
+        }
+      }
+      if (found) {
+        if (path.empty() || uri.substr(path.size()) == path) {
+          return value;
+        }
+      }
+    }
   }
   return "";
 }
@@ -920,7 +961,7 @@ retry:
       auto pos = req_path.find('?');
       if (pos != std::string::npos) {
         req_path.resize(pos);
-        std::istringstream iss(req_raw_path);
+        std::istringstream iss(req_raw_path.substr(pos + 1));
         std::string keyval, key, val;
         while (std::getline(iss, keyval, '&')) {
           std::istringstream isk(keyval);
