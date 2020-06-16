@@ -47,7 +47,7 @@ int main() {
   env.add_callback("escape", 1, [](inja::Arguments& args) {
     return clask::html_encode(args.at(0)->get<std::string>());
   });
-  std::mutex mx;
+  std::mutex mu;
   std::unordered_map<std::string, user> sessions;
 
   auto s = clask::server();
@@ -58,7 +58,9 @@ int main() {
     auto u = authenticate(username, password);
     if (nullptr != u.get()) {
       auto r = random_string();
+      mu.lock();
       sessions[r] = *u;
+      mu.unlock();
       return clask::response {
         .code = 302,
         .content = "",
@@ -78,9 +80,11 @@ int main() {
   });
   s.POST("/logout", [&](clask::request& req) -> clask::response {
     auto session_id = req.cookie_value("session-id");
+    mu.lock();
     if (!session_id.empty() && sessions.count(session_id) > 0) {
       sessions.erase(session_id);
     }
+    mu.unlock();
     return clask::response {
       .code = 302,
       .content = "",
@@ -93,6 +97,7 @@ int main() {
     auto session_id = req.cookie_value("session-id");
     nlohmann::json ctx;
     if (!session_id.empty()) {
+      mu.lock();
       if (sessions.count(session_id) > 0) {
         user u = sessions[session_id];
         ctx["user"]["id"] = u.id;
@@ -101,6 +106,7 @@ int main() {
       } else if (req.uri_params["err"] == "auth") {
         ctx["err"] = "auth";
       }
+      mu.unlock();
     }
     return clask::response {
       .code = 200,
