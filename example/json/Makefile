@@ -13,18 +13,15 @@ LIBS = -lstdc++fs -lpthread
 TARGET = main
 endif
 
-.SUFFIXES: .cxx .hpp .c .o
+.SUFFIXES: .cxx .hpp .o
 
 all : $(TARGET)
 
 $(TARGET) : $(OBJS)
-	$(CXX) -std=c++17 -o $@ $(OBJS) $(LIBS)
+	$(CXX) -o $@ $(OBJS) $(LIBS)
 
 .cxx.o :
-	$(CXX) -std=c++17 -c $(CXXFLAGS) -I. $< -o $@
-
-.c.o :
-	$(CC) -c $(CXXFLAGS) -I. $< -o $@
+	$(CXX) -c $(CXXFLAGS) -I. $< -o $@
 
 clean :
 	rm -f *.o $(TARGET)
