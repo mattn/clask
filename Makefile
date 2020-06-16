@@ -15,7 +15,7 @@ endif
 
 .PHONY: test
 
-.SUFFIXES: .cxx .hpp .c .o
+.SUFFIXES: .cxx .hpp .o
 
 all : $(TARGET)
 
@@ -25,14 +25,11 @@ $(TARGET) : $(OBJS)
 .cxx.o :
 	$(CXX) -c $(CXXFLAGS) $< -o $@
 
-.c.o :
-	$(CC) -c $(CXXFLAGS) $< -o $@
-
 clean :
 	-rm -f *.o $(TARGET) clask_teset
 
 test : picotest
-	$(CXX) -std=c++17 -I. -Ipicotest -o clask_test test.cxx picotest/picotest.c $(LIBS)
+	$(CXX) $(CXXFLAGS) -Ipicotest -o clask_test test.cxx picotest/picotest.c $(LIBS)
 	./clask_test
 
 picotest :
