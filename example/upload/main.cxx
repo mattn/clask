@@ -4,17 +4,17 @@
 static bool save_file(clask::part p) {
   auto filename = p.filename();
   if (filename.empty()) {
-	clask::logger().get(clask::ERR) << "filename is not provided";
+    clask::logger().get(clask::ERR) << "filename is not provided";
     return false;
   }
   std::filesystem::path fn(clask::to_wstring(filename));
   if (!fn.has_filename()) {
-	clask::logger().get(clask::ERR) << "filename is not provided";
+    clask::logger().get(clask::ERR) << "filename is not provided";
     return false;
   }
   std::wstring wfn = fn.filename().wstring();
   if (wfn.empty() || wfn[0] == '.') {
-	clask::logger().get(clask::ERR) << "filename is not provided";
+    clask::logger().get(clask::ERR) << "filename is not provided";
     return false;
   }
   fn = L"files/" + wfn;
@@ -35,9 +35,9 @@ int main() {
     for (const auto& e : std::filesystem::directory_iterator("files")) {
       auto fn = e.path().filename().u8string();
       if (fn[0] == '.') continue;
-	  data[n++] = fn;
+      data[n++] = fn;
     }
-	return data.dump();
+    return data.dump();
   });
   s.POST("/upload", [](clask::request& req) -> clask::response {
     std::vector<clask::part> parts;
