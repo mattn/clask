@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>demo</title>
+  <style>.error { color: red; }</style>
+</head>
+<body>
+  {% if exists("user") %}
+  Hi, {{ user.realname }}
+  <form action="/logout" method="post"> 
+    <input type="submit" value="Logout"><br>
+  </form>
+  {% else %} 
+  <form action="/login" method="post"> 
+    <label for="username">username:</label><br>
+    <input type="text" id="username" name="username"><br>
+    <label for="username">password:</label><br>
+    <input type="password" id="password" name="password"><br>
+    <input type="submit" value="Login"><br>
+  </form>
+    {% if exists("err") %}
+    <p class="error">username or password is wrong</p>
+    {% endif %}
+  {% endif %}
+</body>
+</html>
