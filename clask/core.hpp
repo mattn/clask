@@ -620,7 +620,7 @@ private:
   node treePOST;
   void parse_tree(node&, const std::string&, const func_t);
   bool match(const std::string&, const std::string&, std::function<void(const func_t& fn, const std::vector<std::string>&)>) const;
-  void run(const std::string&, int);
+  void _run(const std::string&, int);
 
 public:
 #define CLASK_DEFINE_REQUEST(name) \
@@ -864,7 +864,7 @@ void server_t::static_dir(const std::string& path, const std::string& dir, bool 
   });
 }
 
-void server_t::run(const std::string& host, int port = 8080) {
+void server_t::_run(const std::string& host, int port = 8080) {
   int server_fd, s;
   struct sockaddr_in address;
   sockopt_t opt = 1;
@@ -897,6 +897,9 @@ void server_t::run(const std::string& host, int port = 8080) {
     address.sin_addr.s_addr = htonl(INADDR_ANY);
   else {
     auto info = gethostbyname(host.c_str());
+    if (info == nullptr) {
+      throw std::runtime_error("gethostbyname");
+    }
     address.sin_addr = *(struct in_addr *)(info->h_addr_list[0]);
   }
   address.sin_port = htons(port);
@@ -941,12 +944,16 @@ retry:
         }
         if (pret == -1) {
           // ParseError
+#ifndef CLASK_DISABLE_LOGS
           logger().get(ERR) << "invalid request";
+#endif
           return;
         }
         if (buflen == sizeof(buf)) {
           // RequestIsTooLongError
+#ifndef CLASK_DISABLE_LOGS
           logger().get(ERR) << "request is too long";
+#endif
           continue;
         }
       }
@@ -1017,14 +1024,20 @@ retry:
         int code = 500;
         try {
           code = fn.handle(s, req, keep_alive);
+#ifndef CLASK_DISABLE_LOGS
           logger().get(INFO) << remote << " " << code << " " << req_method << " " << req_path;
+#endif
         } catch (std::exception& e) {
+#ifndef CLASK_DISABLE_LOGS
           logger().get(WARN) << remote << " " << code << " " << req_method << " " << req_path;
+#endif
           static const std::string res_content = "HTTP/1.0 500 Internal Server Error\r\nContent-Type: text/plain\r\n\r\nInternal Server Error";
           send(s, res_content.data(), res_content.size(), 0);
         }
       })) {
+#ifndef CLASK_DISABLE_LOGS
         logger().get(WARN) << remote << " " << 404 << " " << req_method << " " << req_path;
+#endif
         static const std::string res_content = "HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\n\r\nNot Found";
         send(s, res_content.data(), res_content.size(), 0);
       }
@@ -1042,13 +1055,13 @@ void server_t::run(const std::string& addr) {
   if (pos == std::string::npos) {
     throw std::runtime_error("invalid host:port");
   }
-  auto host = addr.substr(0, pos - 1);
+  auto host = addr.substr(0, pos);
   auto port = std::stoi(addr.substr(pos + 1));
-  run(host, port);
+  _run(host, port);
 }
 
 void server_t::run(int port = 8080) {
-  run("", port);
+  _run("", port);
 }
 
 server_t server() { return server_t{}; }
