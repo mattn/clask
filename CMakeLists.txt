@@ -17,3 +17,5 @@ set (t_ main)
 set (t_ clask_test)
     add_executable (${t_} test.cxx)
     target_link_libraries (${t_} PRIVATE clask-core)
+
+add_subdirectory (example)
