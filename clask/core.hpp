@@ -198,7 +198,7 @@ inline std::string url_decode(const std::string &s) {
 
 typedef std::pair<std::string, std::string> header;
 
-typedef struct {
+typedef struct _part {
   std::vector<header> headers;
   std::string body;
   std::string header_value(const std::string&);
@@ -565,7 +565,7 @@ typedef std::function<void(response_writer&, request&)> functor_writer;
 typedef std::function<std::string(request&)> functor_string;
 typedef std::function<response(request&)> functor_response;
 
-typedef struct {
+typedef struct _func_t {
   functor_writer f_writer;
   functor_string f_string;
   functor_response f_response;
@@ -758,7 +758,7 @@ void serve_dir(response_writer& resp, request& req, const std::string& path) {
   os.clear(std::stringstream::goodbit);
 
   for (const auto& e : std::filesystem::directory_iterator(wpath)) {
-    auto fn = e.path().filename().u8string();
+    auto fn = e.path().filename().string();
     if (e.is_directory()) fn += "/";
     os << "<a href=\"" << url_encode(fn, false) << "\">" << html_encode(fn) << "</a></br>\n";
     resp.write(os.str());
@@ -781,7 +781,7 @@ void serve_file(response_writer& resp, request& req, const std::string& path) {
     return;
   }
 
-  auto it = content_types.find(fspath.extension().u8string());
+  auto it = content_types.find(fspath.extension().string());
   if (it != content_types.end()) {
     resp.set_header("content-type", it->second);
   }
@@ -794,9 +794,9 @@ void serve_file(response_writer& resp, request& req, const std::string& path) {
   std::tm *gmt = std::gmtime(&tt);
   for (auto& h : req.headers) {
     if (h.first == "If-Modified-Since") {
-      std::tm fgmt;
-      std::get_time(&fgmt, h.second.c_str());
-      if (std::mktime(&fgmt) <= std::mktime(gmt)) {
+      std::tm file_gmt;
+      (void) std::get_time(&file_gmt, h.second.c_str());
+      if (std::mktime(&file_gmt) <= std::mktime(gmt)) {
         resp.clear_header();
         resp.code = 304;
         resp.set_header("content-type", "text/plain");
