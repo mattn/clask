@@ -1,6 +1,11 @@
 #ifndef INCLUDE_CLASK_HPP_
 #define INCLUDE_CLASK_HPP_
 
+#define _CRT_SECURE_NO_WARNINGS
+#define _SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING
+#define _SILENCE_ALL_CXX17_DEPRECATION_WARNINGS
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
+
 #include <algorithm>
 #include <functional>
 #include <utility>
@@ -22,7 +27,7 @@
 # include <ws2tcpip.h>
 inline static void socket_perror(const char *s) {
   char buf[512];
-  FormatMessage(
+  FormatMessageA(
       FORMAT_MESSAGE_FROM_SYSTEM,
       nullptr,
       WSAGetLastError(),
@@ -102,7 +107,7 @@ inline std::wstring to_wstring(const std::string& input) {
   try {
     std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
     return converter.from_bytes(input);
-  } catch (std::range_error& e) {
+  } catch (std::range_error&) {
     size_t length = input.length();
     std::wstring result;
     result.reserve(length);
@@ -391,10 +396,10 @@ void response_writer::write_headers() {
   std::ostringstream os;
   os << "HTTP/1.0 " << code << " " << status_codes[code] << "\r\n";
   auto res_headers = os.str();
-  send(s, res_headers.data(), res_headers.size(), 0);
+  send(s, res_headers.data(), (int) res_headers.size(), 0);
   for (auto& h : headers) {
     auto hh = h.first + ": " + h.second + "\r\n";
-    send(s, hh.data(), hh.size(), 0);
+    send(s, hh.data(), (int) hh.size(), 0);
   }
   send(s, "\r\n", 2, 0);
 }
@@ -403,7 +408,7 @@ void response_writer::write(const std::string& content) {
   if (!header_out) {
     write_headers();
   }
-  send(s, content.data(), content.size(), 0);
+  send(s, content.data(), (int) content.size(), 0);
 }
 
 void response_writer::end() {
@@ -581,8 +586,8 @@ int func_t::handle(int s, request& req, bool& keep_alive) const {
     os << "Connection: " << (keep_alive ? "Keep-Alive" : "Close") << "\r\n";
     os << "Content-Length: " << res.size() << "\r\n\r\n";
     auto res_headers = os.str();
-    send(s, res_headers.data(), res_headers.size(), 0);
-    send(s, res.data(), res.size(), 0);
+    send(s, res_headers.data(), (int) res_headers.size(), 0);
+    send(s, res.data(), (int) res.size(), 0);
   } else if (f_writer != nullptr) {
     response_writer writer(s, 200);
     f_writer(writer, req);
@@ -600,8 +605,8 @@ int func_t::handle(int s, request& req, bool& keep_alive) const {
     }
     os << "Content-Length: " << res.content.size() << "\r\n\r\n";
     auto res_headers = os.str();
-    send(s, res_headers.data(), res_headers.size(), 0);
-    send(s, res.content.data(), res.content.size(), 0);
+    send(s, res_headers.data(), (int) res_headers.size(), 0);
+    send(s, res.content.data(), (int) res.content.size(), 0);
     code = res.code;
   }
   return code;
@@ -886,7 +891,7 @@ void server_t::_run(const std::string& host, int port = 8080) {
   }
 #endif
 
-  if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+  if ((server_fd = (int) socket(AF_INET, SOCK_STREAM, 0)) < 0) {
     throw std::runtime_error("socket failed");
   }
 
@@ -913,7 +918,7 @@ void server_t::_run(const std::string& host, int port = 8080) {
   }
 
   while (true) {
-    if ((s = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen))<0) {
+    if ((s = (int) accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen))<0) {
       throw std::runtime_error("accept");
     }
 
@@ -927,7 +932,7 @@ retry:
       ssize_t rret;
 
       while (true) {
-        while ((rret = recv(s, buf + buflen, sizeof(buf) - buflen, 0)) == -1 && errno == EINTR);
+        while ((rret = recv(s, buf + buflen, (int) (sizeof(buf) - buflen), 0)) == -1 && errno == EINTR);
         if (rret <= 0) {
           // IOError
           closesocket(s);
@@ -1001,7 +1006,7 @@ retry:
         auto rest = content_length - (buflen - pret);
         buflen = 0;
         while (rest > 0) {
-          while ((rret = recv(s, buf + buflen, sizeof(buf) - buflen, 0)) == -1 && errno == EINTR);
+          while ((rret = recv(s, buf + buflen, (int) (sizeof(buf) - buflen), 0)) == -1 && errno == EINTR);
           if (rret <= 0) {
             // IOError
             closesocket(s);
@@ -1028,20 +1033,20 @@ retry:
 #ifndef CLASK_DISABLE_LOGS
           logger().get(INFO) << remote << " " << code << " " << req_method << " " << req_path;
 #endif
-        } catch (std::exception& e) {
+        } catch (std::exception&) {
 #ifndef CLASK_DISABLE_LOGS
           logger().get(WARN) << remote << " " << code << " " << req_method << " " << req_path;
 #endif
           std::ostringstream os;
           os << "HTTP/1.0 " << code << " Internal Server Error\r\nContent-Type: text/plain\r\n\r\nInternal Server Error";
-          send(s, os.str().data(), os.str().size(), 0);
+          send(s, os.str().data(), (int) os.str().size(), 0);
         }
       })) {
 #ifndef CLASK_DISABLE_LOGS
         logger().get(WARN) << remote << " " << 404 << " " << req_method << " " << req_path;
 #endif
         static const std::string res_content = "HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\n\r\nNot Found";
-        send(s, res_content.data(), res_content.size(), 0);
+        send(s, res_content.data(), (int) res_content.size(), 0);
       }
 
       if (keep_alive)
