@@ -3,14 +3,15 @@ cmake_minimum_required (VERSION 3.15)
 project (clask
          LANGUAGES CXX C)
 
+find_package(Threads REQUIRED)
+
 set (t_ clask-settings)
     add_library (${t_} INTERFACE)
     target_compile_features (${t_} INTERFACE cxx_std_17)
 if(WIN32)
     target_link_libraries(${t_} INTERFACE ws2_32)
-else()
-    target_link_libraries(${t_} INTERFACE pthread)
 endif()
+    target_link_libraries(${t_} INTERFACE Threads::Threads)
 
 add_subdirectory (clask)
 
