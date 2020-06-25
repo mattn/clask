@@ -8,6 +8,8 @@ set (t_ clask-settings)
     target_compile_features (${t_} INTERFACE cxx_std_17)
 if(WIN32)
     target_link_libraries(${t_} INTERFACE ws2_32)
+else()
+    target_link_libraries(${t_} INTERFACE pthread)
 endif()
 
 add_subdirectory (clask)
