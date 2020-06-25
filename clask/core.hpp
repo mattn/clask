@@ -16,6 +16,7 @@
 #include <thread>
 #include <filesystem>
 #include <chrono>
+#include <codecvt>
 
 #ifdef _WIN32
 # include <ws2tcpip.h>
@@ -131,7 +132,7 @@ inline void trim_string(std::string& s, const std::string& cutsel = " \t\v\r\n")
   }
 }
 
-inline std::vector<std::string> split_string(const std::string &s, char delim, size_t max_elems = -1) {
+inline std::vector<std::string> split_string(const std::string& s, char delim, size_t max_elems = -1) {
   std::vector<std::string> elems;
   std::stringstream ss(s);
   std::string item;
@@ -1031,8 +1032,9 @@ retry:
 #ifndef CLASK_DISABLE_LOGS
           logger().get(WARN) << remote << " " << code << " " << req_method << " " << req_path;
 #endif
-          static const std::string res_content = "HTTP/1.0 500 Internal Server Error\r\nContent-Type: text/plain\r\n\r\nInternal Server Error";
-          send(s, res_content.data(), res_content.size(), 0);
+          std::ostringstream os;
+          os << "HTTP/1.0 " << code << " Internal Server Error\r\nContent-Type: text/plain\r\n\r\nInternal Server Error";
+          send(s, os.str().data(), os.str().size(), 0);
         }
       })) {
 #ifndef CLASK_DISABLE_LOGS
