@@ -1,5 +1,4 @@
-
-cmake_minimum_required (VERSION 3.16)
+cmake_minimum_required (VERSION 3.15)
 
 add_subdirectory (json)
 add_subdirectory (login)

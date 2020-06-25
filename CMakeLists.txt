@@ -1,5 +1,4 @@
-
-cmake_minimum_required (VERSION 3.17)
+cmake_minimum_required (VERSION 3.15)
 
 project (clask
          LANGUAGES CXX C)
@@ -8,7 +7,7 @@ set (t_ clask-settings)
     add_library (${t_} INTERFACE)
     target_compile_features (${t_} INTERFACE cxx_std_17)
 if(WIN32)
-    target_link_libraries(${t_} INTERFACE wsock32 ws2_32)
+    target_link_libraries(${t_} INTERFACE ws2_32)
 endif()
 
 add_subdirectory (clask)

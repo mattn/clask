@@ -1,5 +1,4 @@
-
-cmake_minimum_required (VERSION 3.17)
+cmake_minimum_required (VERSION 3.15)
 
 set (t_ clask-core)
     add_library (${t_} INTERFACE)

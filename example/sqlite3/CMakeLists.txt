@@ -1,6 +1,4 @@
-
-
-cmake_minimum_required (VERSION 3.16)
+cmake_minimum_required (VERSION 3.15)
 
 set (t_ example-sqlite3)
     add_executable (${t_} main.cxx)
