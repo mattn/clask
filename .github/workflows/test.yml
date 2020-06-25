@@ -13,5 +13,14 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
-    - name: Make test
-      run: make test
+      with:
+        submodules: true
+    - name: Setup System
+      run: |
+        sudo apt-get install libsqlite3-dev
+    - name: Configure
+      run: mkdir build && cd build && cmake -DCMAKE_CXX_FLAGS="-Werror" ..
+    - name: Build
+      run: cmake --build build
+    - name: Test
+      run: cd build && ./clask_test

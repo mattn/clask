@@ -1,0 +1,7 @@
+cmake_minimum_required (VERSION 3.15)
+
+set (t_ example-sqlite3)
+    add_executable (${t_} main.cxx)
+    target_link_libraries (${t_} PRIVATE clask-core)
+    target_include_directories(${t_} PUBLIC .)
+    target_link_libraries(${t_} PRIVATE sqlite3)

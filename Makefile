@@ -26,7 +26,7 @@ $(TARGET) : $(OBJS)
 	$(CXX) -c $(CXXFLAGS) $< -o $@
 
 clean :
-	-rm -f *.o $(TARGET) clask_teset
+	-rm -f *.o $(TARGET) clask_test
 
 test : picotest
 	$(CXX) $(CXXFLAGS) -Ipicotest -o clask_test test.cxx picotest/picotest.c $(LIBS)
