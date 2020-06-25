@@ -7,6 +7,9 @@ project (clask
 set (t_ clask-settings)
     add_library (${t_} INTERFACE)
     target_compile_features (${t_} INTERFACE cxx_std_17)
+if(WIN32)
+    target_link_libraries(${t_} INTERFACE wsock32 ws2_32)
+endif()
 
 add_subdirectory (clask)
 
@@ -15,7 +18,7 @@ set (t_ main)
     target_link_libraries (${t_} PRIVATE clask-core)
 
 set (t_ clask_test)
-    add_executable (${t_} test.cxx)
+    add_executable (${t_} test.cxx picotest/picotest.c)
     target_link_libraries (${t_} PRIVATE clask-core)
 
 add_subdirectory (example)
