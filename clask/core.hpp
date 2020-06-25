@@ -56,12 +56,12 @@ typedef int sockopt_t;
 
 namespace clask {
 
-enum log_level {ERR, WARN, INFO, DEBUG};
+enum class log_level {ERR, WARN, INFO, DEBUG};
 
 class logger {
 protected:
   std::ostringstream os;
-  log_level lv;
+  enum class log_level lv;
 
 private:
   logger(const logger&);
@@ -69,9 +69,9 @@ private:
 
 public:
   static log_level default_level;
-  logger() {};
+  logger() : lv(log_level::INFO) {};
   virtual ~logger();
-  std::ostringstream& get(log_level level = INFO);
+  std::ostringstream& get(log_level level = log_level::INFO);
   static log_level& level();
 };
 
@@ -80,9 +80,9 @@ std::ostringstream& logger::get(log_level level) {
   auto tm = *std::localtime(&t);
   os << std::put_time(&tm, "%Y/%m/%d %H:%M:%S ");
   switch (level) {
-    case ERR: os << "ERR: "; break;
-    case WARN: os << "WARN: "; break;
-    case INFO: os << "INFO: "; break;
+    case log_level::ERR: os << "ERR: "; break;
+    case log_level::WARN: os << "WARN: "; break;
+    case log_level::INFO: os << "INFO: "; break;
     default: os << "DEBUG: "; break;
   }
   lv = level;
@@ -951,14 +951,14 @@ retry:
         if (pret == -1) {
           // ParseError
 #ifndef CLASK_DISABLE_LOGS
-          logger().get(ERR) << "invalid request";
+          logger().get(log_level::ERR) << "invalid request";
 #endif
           return;
         }
         if (buflen == sizeof(buf)) {
           // RequestIsTooLongError
 #ifndef CLASK_DISABLE_LOGS
-          logger().get(ERR) << "request is too long";
+          logger().get(log_level::ERR) << "request is too long";
 #endif
           continue;
         }
@@ -1019,23 +1019,23 @@ retry:
 
       request req(
           req_method,
-          std::move(req_raw_path),
+          req_raw_path,
           req_path,
           std::move(req_uri_params),
           std::move(req_headers),
           std::move(req_body));
 
       if (!match(req_method, req_path, [&](const func_t& fn, const std::vector<std::string>& args) {
-        req.args = std::move(args);
+        req.args = args;
         int code = 500;
         try {
           code = fn.handle(s, req, keep_alive);
 #ifndef CLASK_DISABLE_LOGS
-          logger().get(INFO) << remote << " " << code << " " << req_method << " " << req_path;
+          logger().get(log_level::INFO) << remote << " " << code << " " << req_method << " " << req_path;
 #endif
         } catch (std::exception&) {
 #ifndef CLASK_DISABLE_LOGS
-          logger().get(WARN) << remote << " " << code << " " << req_method << " " << req_path;
+          logger().get(log_level::WARN) << remote << " " << code << " " << req_method << " " << req_path;
 #endif
           std::ostringstream os;
           os << "HTTP/1.0 " << code << " Internal Server Error\r\nContent-Type: text/plain\r\n\r\nInternal Server Error";
@@ -1043,7 +1043,7 @@ retry:
         }
       })) {
 #ifndef CLASK_DISABLE_LOGS
-        logger().get(WARN) << remote << " " << 404 << " " << req_method << " " << req_path;
+        logger().get(log_level::WARN) << remote << " " << 404 << " " << req_method << " " << req_path;
 #endif
         static const std::string res_content = "HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\n\r\nNot Found";
         send(s, res_content.data(), (int) res_content.size(), 0);
@@ -1073,7 +1073,7 @@ void server_t::run(int port = 8080) {
 
 server_t server() { return server_t{}; }
 
-log_level logger::default_level = INFO;
+log_level logger::default_level = log_level::INFO;
 
 log_level& logger::level() {
   return default_level;
