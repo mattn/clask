@@ -13,5 +13,9 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
-    - name: Make test
-      run: make test
+    - name: Configure
+      run: mkdir build && cd build && cmake -DCMAKE_CXX_FLAGS="-Werror" ..
+    - name: build
+      run: cmake --build build
+    - name: test
+      run: cd build && ./clask_test
