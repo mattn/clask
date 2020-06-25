@@ -56,12 +56,12 @@ typedef int sockopt_t;
 
 namespace clask {
 
-enum class log_level {ERR, WARN, INFO, DEBUG};
+typedef enum {ERR, WARN, INFO, DEBUG} log_level;
 
 class logger {
 protected:
   std::ostringstream os;
-  enum class log_level lv;
+  log_level lv;
 
 private:
   logger(const logger&);
@@ -69,7 +69,7 @@ private:
 
 public:
   static log_level default_level;
-  logger() : lv(log_level::INFO) {};
+  logger() : lv(clask::log_level::INFO) {};
   virtual ~logger();
   std::ostringstream& get(log_level level = log_level::INFO);
   static log_level& level();
