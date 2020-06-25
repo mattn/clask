@@ -15,6 +15,9 @@ jobs:
     - uses: actions/checkout@v2
       with:
         submodules: true
+    - name: Setup System
+      run: |
+        sudo apt-get install libsqlite3-dev
     - name: Configure
       run: mkdir build && cd build && cmake -DCMAKE_CXX_FLAGS="-Werror" ..
     - name: Build
