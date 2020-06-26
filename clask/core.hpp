@@ -76,6 +76,7 @@ public:
 };
 
 logger& logger::operator =(const logger& l) {
+  this->lv = l.lv;
   return *this;
 }
 
@@ -126,7 +127,7 @@ inline std::string camelize(std::string& s) {
   auto n = s.length();
   for (size_t i = 0; i < n; i++) {
     if (i == 0 || s[i - 1] == ' ' || s[i - 1] == '-') {
-      s[i] = std::toupper(s[i]);
+      s[i] = (char) std::toupper(s[i]);
       continue;
     }
   }
