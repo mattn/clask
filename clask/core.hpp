@@ -195,7 +195,7 @@ inline std::string url_decode(const std::string &s) {
   int v;
   for (size_t i = 0; i < s.length(); i++) {
     if (s[i] == '%') {
-      std::sscanf(s.substr(i + 1, 2).c_str(), "%x", &v);
+      (void) std::sscanf(s.substr(i + 1, 2).c_str(), "%x", &v);
       ret += static_cast<char>(v);
       i += 2;
     } else {
@@ -644,6 +644,7 @@ void POST(const std::string&, const functor_ ## name);
   void run(const std::string&);
   void run(int);
   logger log;
+  server_t() : treeGET{}, treePOST{} {}
 };
 
 void server_t::parse_tree(node& n, const std::string& s, const func_t fn) {
@@ -882,7 +883,7 @@ void server_t::_run(const std::string& host, int port = 8080) {
 
 #ifdef _WIN32
   WSADATA wsa;
-  WSAStartup(MAKEWORD(2, 0), &wsa);
+  (void) WSAStartup(MAKEWORD(2, 0), &wsa);
 #endif
 
   sort_handlers(treeGET);
