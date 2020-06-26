@@ -33,9 +33,10 @@ if(NOT MSVC)
 endif()
 if(WIN32)
     target_link_libraries(${t_} INTERFACE ws2_32)
+else()
+    target_link_libraries(${t_} INTERFACE stdc++fs)
 endif()
     target_link_libraries(${t_} INTERFACE Threads::Threads)
-    target_link_libraries(${t_} INTERFACE stdc++fs)
 
 add_subdirectory (clask)
 
