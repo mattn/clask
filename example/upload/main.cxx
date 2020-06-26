@@ -4,17 +4,17 @@
 static bool save_file(clask::part p) {
   auto filename = p.filename();
   if (filename.empty()) {
-    clask::logger().get(clask::ERR) << "filename is not provided";
+    clask::logger().get(clask::log_level::ERR) << "filename is not provided";
     return false;
   }
   std::filesystem::path fn(clask::to_wstring(filename));
   if (!fn.has_filename()) {
-    clask::logger().get(clask::ERR) << "filename is not provided";
+    clask::logger().get(clask::log_level::ERR) << "filename is not provided";
     return false;
   }
   std::wstring wfn = fn.filename().wstring();
   if (wfn.empty() || wfn[0] == '.') {
-    clask::logger().get(clask::ERR) << "filename is not provided";
+    clask::logger().get(clask::log_level::ERR) << "filename is not provided";
     return false;
   }
   fn = L"files/" + wfn;
@@ -26,7 +26,7 @@ static bool save_file(clask::part p) {
 
 int main() {
   auto s = clask::server();
-  s.log.default_level = clask::INFO;
+  s.log.default_level = clask::log_level::INFO;
   s.static_dir("/files", "./files");
   s.static_dir("/", "./public");
   s.GET("/api", [](clask::request& req) {

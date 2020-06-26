@@ -56,7 +56,7 @@ typedef int sockopt_t;
 
 namespace clask {
 
-typedef enum {ERR, WARN, INFO, DEBUG} log_level;
+typedef enum class _log_level {ERR, WARN, INFO, DEBUG} log_level;
 
 class logger {
 protected:
@@ -74,6 +74,10 @@ public:
   std::ostringstream& get(log_level level = log_level::INFO);
   static log_level& level();
 };
+
+logger& logger::operator =(const logger& l) {
+  return *this;
+}
 
 std::ostringstream& logger::get(log_level level) {
   auto t = std::time(nullptr);
