@@ -131,7 +131,7 @@ inline std::string camelize(std::string& s) {
       continue;
     }
   }
-  return std::move(s.substr(0, n));
+  return s.substr(0, n);
 }
 
 inline void trim_string(std::string& s, const std::string& cutsel = " \t\v\r\n") {
@@ -371,7 +371,7 @@ inline std::unordered_map<std::string, std::string> params(const std::string& s)
   while(std::getline(iss, keyval, '&')) {
     std::istringstream isk(keyval);
     if(std::getline(std::getline(isk, key, '='), val)) {
-      ret[std::move(url_decode(key))] = std::move(url_decode(val));
+      ret[url_decode(key)] = url_decode(val);
     }
   }
   return ret;
@@ -389,7 +389,7 @@ void response_writer::set_header(std::string key, std::string val) {
       return;
     }
   }
-  headers.emplace_back(std::move(std::make_pair(h, val)));
+  headers.emplace_back(std::make_pair(h, val));
 }
 
 void response_writer::write(char* buf, size_t n) {
@@ -513,9 +513,9 @@ bool request::parse_multipart(std::vector<part>& parts) {
     for (size_t n = 0; n < num_headers; n++) {
       auto key = std::string(hdrs[n].name, hdrs[n].name_len);
       auto val = std::string(hdrs[n].value, hdrs[n].value_len);
-      key = std::move(url_decode(key));
-      val = std::move(url_decode(val));
-      req_headers.emplace_back(std::move(std::make_pair(std::move(key), std::move(val))));
+      key = url_decode(key);
+      val = url_decode(val);
+      req_headers.emplace_back(std::make_pair(std::move(key), std::move(val)));
     }
 
     part p = {
@@ -661,11 +661,11 @@ void server_t::parse_tree(node& n, const std::string& s, const func_t fn) {
       }
     }
     if (!found) {
-      n.children.emplace_back(std::move(node {
+      n.children.emplace_back(node {
         .name = std::move(sub),
         .fn = fn,
         .placeholder = placeholder,
-      }));
+      });
     }
     return;
   }
@@ -706,7 +706,7 @@ bool server_t::match(const std::string& method, const std::string& s, std::funct
     bool found = false;
     for (const auto vv : n.children) {
       if (vv.placeholder) {
-        args.emplace_back(std::move(url_decode(sub)));
+        args.emplace_back(url_decode(sub));
         n = vv;
         found = true;
         break;
@@ -984,7 +984,7 @@ retry:
         while (std::getline(iss, keyval, '&')) {
           std::istringstream isk(keyval);
           if(std::getline(std::getline(isk, key, '='), val)) {
-            req_uri_params[std::move(url_decode(key))] = std::move(url_decode(val));
+            req_uri_params[url_decode(key)] = url_decode(val);
           }
         }
       }
@@ -1004,7 +1004,7 @@ retry:
           if (val == "keep-alive")
             keep_alive = true;
         }
-        req_headers.emplace_back(std::move(std::make_pair(std::move(key), std::move(val))));
+        req_headers.emplace_back(std::make_pair(std::move(key), std::move(val)));
       }
 
       if (has_content_length && buflen - pret < content_length) {
