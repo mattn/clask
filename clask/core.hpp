@@ -192,7 +192,7 @@ inline std::string url_encode(const std::string &value, bool escape_slash = true
 
 inline std::string url_decode(const std::string &s) {
   std::string ret;
-  int v;
+  unsigned int v;
   for (size_t i = 0; i < s.length(); i++) {
     if (s[i] == '%') {
       (void) std::sscanf(s.substr(i + 1, 2).c_str(), "%x", &v);
@@ -748,9 +748,9 @@ void server_t::POST(const std::string& path, functor_ ## name fn) { \
   parse_tree(treePOST, path, func_t { .f_ ## name = fn }); \
 }
 
-CLASK_DEFINE_REQUEST(writer);
-CLASK_DEFINE_REQUEST(string);
-CLASK_DEFINE_REQUEST(response);
+CLASK_DEFINE_REQUEST(writer)
+CLASK_DEFINE_REQUEST(string)
+CLASK_DEFINE_REQUEST(response)
 
 #undef CLASK_DEFINE_REQUEST
 
