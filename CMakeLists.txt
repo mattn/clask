@@ -1,4 +1,4 @@
-cmake_minimum_required (VERSION 3.15)
+cmake_minimum_required (VERSION 3.10)
 
 project (clask
          LANGUAGES CXX C)
@@ -20,6 +20,7 @@ if(MSVC)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /W4")
   endif()
 elseif(CMAKE_COMPILER_IS_GNUCC OR CMAKE_COMPILER_IS_GNUCXX)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wno-long-long")
 endif()
 
@@ -34,6 +35,7 @@ if(WIN32)
     target_link_libraries(${t_} INTERFACE ws2_32)
 endif()
     target_link_libraries(${t_} INTERFACE Threads::Threads)
+    target_link_libraries(${t_} INTERFACE stdc++fs)
 
 add_subdirectory (clask)
 
