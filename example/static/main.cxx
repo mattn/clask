@@ -4,7 +4,7 @@ int main() {
   auto s = clask::server();
   s.log.default_level = clask::log_level::INFO;
   s.static_dir("/", "./public");
-  s.GET("/api", [](clask::response_writer& resp, clask::request& req) {
+  s.GET("/api", [](clask::response_writer& resp, clask::request&) {
     resp.set_header("content-type", "application/json");
     time_t t;
     struct tm* tm;

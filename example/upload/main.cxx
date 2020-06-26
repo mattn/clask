@@ -29,7 +29,7 @@ int main() {
   s.log.default_level = clask::log_level::INFO;
   s.static_dir("/files", "./files");
   s.static_dir("/", "./public");
-  s.GET("/api", [](clask::request& req) {
+  s.GET("/api", [](clask::request&) {
     nlohmann::json data;
     int n = 0;
     for (const auto& e : std::filesystem::directory_iterator("files")) {

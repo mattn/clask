@@ -4,7 +4,7 @@
 int main() {
   auto s = clask::server();
 
-  s.GET("/api", [&](clask::request& req) {
+  s.GET("/api", [&](clask::request&) {
       nlohmann::json data;
       data["user"][0]["id"] = 1;
       data["user"][0]["name"] = "mattn";

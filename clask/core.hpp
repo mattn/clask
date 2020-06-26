@@ -251,7 +251,7 @@ std::string part::filename() {
     }
     if (sub.substr(0, 10) == "filename*=") {
       sub = sub.substr(10);
-      for (auto& c : sub) c = std::tolower(c);
+      for (auto& c : sub) c = (char) std::tolower(c);
       if (sub.substr(0, 7) == "utf-8''") {
         sub = url_decode(sub.substr(7));
         trim_string(sub, "\"");
@@ -497,13 +497,13 @@ bool request::parse_multipart(std::vector<part>& parts) {
     }
     auto lines = data.substr(0, eos + 4);
 
-    struct phr_header headers[100];
+    struct phr_header hdrs[100];
     size_t prevbuflen = 0, num_headers;
 
-    num_headers = sizeof(headers) / sizeof(headers[0]);
+    num_headers = sizeof(hdrs) / sizeof(hdrs[0]);
     prevbuflen = 0;
     auto pret = phr_parse_headers(
-        lines.data(), lines.size(), headers, &num_headers, prevbuflen);
+        lines.data(), lines.size(), hdrs, &num_headers, prevbuflen);
     if (pret <= 0) {
       return false;
     }
@@ -511,8 +511,8 @@ bool request::parse_multipart(std::vector<part>& parts) {
     std::vector<header> req_headers;
 
     for (size_t n = 0; n < num_headers; n++) {
-      auto key = std::string(headers[n].name, headers[n].name_len);
-      auto val = std::string(headers[n].value, headers[n].value_len);
+      auto key = std::string(hdrs[n].name, hdrs[n].name_len);
+      auto val = std::string(hdrs[n].value, hdrs[n].value_len);
       key = std::move(url_decode(key));
       val = std::move(url_decode(val));
       req_headers.emplace_back(std::move(std::make_pair(std::move(key), std::move(val))));
@@ -824,8 +824,7 @@ void serve_file(response_writer& resp, request& req, const std::string& path) {
 
   char buf[BUFSIZ];
   while (!is.eof()) {
-    auto size = is.read(buf, sizeof(buf)).gcount();
-    resp.write(buf, size);
+    resp.write(buf, (size_t) is.read(buf, sizeof(buf)).gcount());
   }
 }
 
@@ -914,7 +913,7 @@ void server_t::_run(const std::string& host, int port = 8080) {
     }
     address.sin_addr = *(struct in_addr *)(info->h_addr_list[0]);
   }
-  address.sin_port = htons(port);
+  address.sin_port = htons((u_short) port);
 
   if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
     throw std::runtime_error("bind failed");
@@ -1001,7 +1000,7 @@ retry:
           content_length = std::stoi(val);
           has_content_length = true;
         } else if (key == "Connection") {
-          for (auto& c : val) c = std::tolower(c);
+          for (auto& c : val) c = (char) std::tolower(c);
           if (val == "keep-alive")
             keep_alive = true;
         }
