@@ -7,5 +7,7 @@ add_subdirectory (upload)
 
 find_package (SQLite3)
 if (SQLITE3_FOUND)
+  set(SQLITE3_INCLUDE_DIR ${SQLITE3_INCLUDE_DIR})
+  set(SQLITE3_LIBRARIES ${SQLITE3_LIBRARY})
   add_subdirectory (sqlite3)
 endif (SQLITE3_FOUND)
