@@ -646,6 +646,9 @@ void POST(const std::string&, const functor_ ## name);
   void run(int);
   logger log;
   server_t() : treeGET{}, treePOST{} {}
+#ifdef CLASK_TEST
+  bool test_match(const std::string&, const std::string&, std::function<void(const func_t& fn, const std::vector<std::string>&)>) const;
+#endif
 };
 
 void server_t::parse_tree(node& n, const std::string& s, const func_t fn) {
@@ -726,6 +729,12 @@ bool server_t::match(const std::string& method, const std::string& s, std::funct
   }
   return false;
 }
+
+#ifdef CLASK_TEST
+bool server_t::test_match(const std::string& method, const std::string& s, std::function<void(const func_t& fn, const std::vector<std::string>&)> fn) const {
+  return server_t::match(method, s, fn);
+}
+#endif
 
 void sort_handlers(node& n) {
   std::sort(

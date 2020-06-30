@@ -1,4 +1,5 @@
 #include <picotest/picotest.h>
+#define CLASK_TEST
 #include <clask/core.hpp>
 #include <unordered_map>
 
@@ -115,6 +116,49 @@ void test_clask_to_wstring() {
   _ok(clask::to_wstring("あいうえお") == L"あいうえお", R"(clask::to_wstring("あいうえお") == L"あいうえお")");
 }
 
+void test_clask_request_uri_param() {
+  typedef struct {
+    bool result;
+    std::string path;
+    std::vector<std::string> args;
+  } test_param;
+  std::vector<test_param> tests = {
+    {
+      .result = false,
+      .path = "/foa",
+      .args = {},
+    },
+    {
+      .result = true,
+      .path = "/foo",
+      .args = {},
+    },
+    {
+      .result = true,
+      .path = "/foo/boo",
+      .args = { "boo" },
+    },
+    {
+      .result = true,
+      .path = "/foo/ぼえ～",
+      .args = { "ぼえ～" },
+    },
+  };
+
+  auto s = clask::server();
+  s.GET("/foo/:bar", [](clask::request& req) -> std::string {
+    return "OK";
+  });
+  std::for_each(tests.begin(), tests.end(), [&](decltype(tests)::value_type x) {
+    std::vector<std::string> req_args;
+    auto result = s.test_match("GET", x.path, [&](const clask::func_t& fn, const std::vector<std::string>& args) {
+      req_args = args;
+    });
+    _ok(result == x.result, R"(result == x.result)");
+    _ok(req_args.size() == x.args.size(), R"(req.args.size() == x.args.size())");
+  });
+}
+
 int main() {
   subtest("test_clask_params", test_clask_params);
   subtest("test_clask_request_parse_multipart1", test_clask_request_parse_multipart1);
@@ -122,4 +166,5 @@ int main() {
   subtest("test_clask_request_parse_multipart3", test_clask_request_parse_multipart3);
   subtest("test_clask_request_parse_multipart4", test_clask_request_parse_multipart4);
   subtest("test_clask_to_wstring", test_clask_to_wstring);
+  subtest("test_clask_request_uri_param", test_clask_request_uri_param);
 }
