@@ -149,14 +149,14 @@ void test_clask_request_uri_param() {
   s.GET("/foo/:bar", [](clask::request& req) -> std::string {
     return "OK";
   });
-  std::for_each(tests.begin(), tests.end(), [&](decltype(tests)::value_type x) {
+  for(auto x : tests) {
     std::vector<std::string> req_args;
     auto result = s.test_match("GET", x.path, [&](const clask::func_t& fn, const std::vector<std::string>& args) {
       req_args = args;
     });
     _ok(result == x.result, R"(result == x.result)");
     _ok(req_args.size() == x.args.size(), R"(req.args.size() == x.args.size())");
-  });
+  }
 }
 
 int main() {
