@@ -193,15 +193,16 @@ inline std::string url_encode(const std::string &value, bool escape_slash = true
 
 inline std::string url_decode(const std::string &s) {
   std::string ret;
-  unsigned int v;
-  for (size_t i = 0; i < s.length(); i++) {
-    if (s[i] == '%') {
-      (void) std::sscanf(s.substr(i + 1, 2).c_str(), "%x", &v);
-      ret += static_cast<char>(v);
-      i += 2;
-    } else {
-      ret += s[i];
+  const char* p = s.c_str();
+  for (size_t i = 0; *p; i++) {
+    if (*p == '%' && p[1] && p[2] && std::isxdigit(p[1]) && std::isxdigit(p[2])) {
+      const int hi = p[1] - (p[1] <= '9' ? '0' : (p[1] <= 'F' ? 'A' : 'a') - 10);
+      const int lo = p[2] - (p[2] <= '9' ? '0' : (p[2] <= 'F' ? 'A' : 'a') - 10);
+      ret += static_cast<char>(16 * hi + lo);
+      p += 3;
+      continue;
     }
+    ret += *p++;
   }
   return ret;
 }
@@ -537,7 +538,7 @@ bool request::parse_multipart(std::vector<part>& parts) {
 inline std::string request::header_value(const std::string& name) {
   std::string key = name;
   camelize(key);
-  for (auto& h : headers) {
+  for (auto&& h : headers) {
     if (h.first == key) return h.second;
   }
   return "";
@@ -545,11 +546,11 @@ inline std::string request::header_value(const std::string& name) {
 
 inline std::string request::cookie_value(const std::string& name) {
   std::string value, path;
-  for (auto& header : headers) {
+  for (auto&& header : headers) {
     if (header.first == "Cookie") {
       auto elems = split_string(header.second, ';');
       auto found = false;
-      for (auto& elem : elems) {
+      for (auto&& elem : elems) {
         auto v = elem;
         trim_string(v);
         auto toks = split_string(v, '=');
