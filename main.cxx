@@ -1,8 +1,8 @@
+//#define CLASK_DISABLE_LOGS
 #include <clask/core.hpp>
 
 int main() {
   auto s = clask::server();
-  s.log.default_level = clask::log_level::INFO;
   s.GET("/", [](clask::request&) {
     return "OK!";
   });
