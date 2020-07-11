@@ -51,3 +51,6 @@ set (t_ clask_test)
     target_link_libraries (${t_} PRIVATE clask-core)
 
 add_subdirectory (example)
+
+enable_testing()
+add_test(test clask_test)
