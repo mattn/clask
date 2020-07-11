@@ -23,4 +23,4 @@ jobs:
     - name: Build
       run: cmake --build build
     - name: Test
-      run: cd build && ./clask_test
+      run: cd build && ctest
