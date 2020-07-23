@@ -38,6 +38,7 @@ inline static void socket_perror(const char *s) {
   std::cerr << s << ": " << buf << std::endl;
 }
 typedef char sockopt_t;
+#undef DELETE
 #else
 # include <unistd.h>
 # include <sys/fcntl.h>
@@ -628,8 +629,7 @@ typedef struct _node {
 class server_t {
 private:
   std::string compiled_tree;
-  node treeGET;
-  node treePOST;
+  node treeGET, treePOST, treeHEAD, treeDELETE, treePUT, treeANY;
   void parse_tree(node&, const std::string&, const func_t);
   bool match(const std::string&, const std::string&, std::function<void(const func_t& fn, const std::vector<std::string>&)>) const;
   void _run(const std::string&, int);
@@ -637,7 +637,11 @@ private:
 public:
 #define CLASK_DEFINE_REQUEST(name) \
 void GET(const std::string&, const functor_ ## name); \
-void POST(const std::string&, const functor_ ## name);
+void POST(const std::string&, const functor_ ## name); \
+void HEAD(const std::string&, const functor_ ## name); \
+void DELETE(const std::string&, const functor_ ## name); \
+void PUT(const std::string&, const functor_ ## name); \
+void ANY(const std::string&, const functor_ ## name);
   CLASK_DEFINE_REQUEST(writer)
   CLASK_DEFINE_REQUEST(string)
   CLASK_DEFINE_REQUEST(response)
@@ -646,7 +650,7 @@ void POST(const std::string&, const functor_ ## name);
   void run(const std::string&);
   void run(int);
   logger log;
-  server_t() : treeGET{}, treePOST{} {}
+  server_t() : treeGET{}, treePOST{}, treeHEAD{}, treeDELETE{}, treePUT{}, treeANY {} {}
 #ifdef CLASK_TEST
   bool test_match(const std::string&, const std::string&, std::function<void(const func_t& fn, const std::vector<std::string>&)>) const;
 #endif
@@ -694,7 +698,11 @@ void server_t::parse_tree(node& n, const std::string& s, const func_t fn) {
 }
 
 bool server_t::match(const std::string& method, const std::string& s, std::function<void(const func_t& fn, const std::vector<std::string>&)> fn) const {
-  node n = method == "GET" ? treeGET : treePOST;
+  node n = method == "GET" ? treeGET :
+           method == "POST" ? treePOST :
+           method == "HEAD" ? treeHEAD :
+           method == "DELETE" ? treeDELETE :
+           method == "PUT" ? treePUT : treeANY;
   std::vector<std::string> args;
   auto ss = s;
   std::string sub;
@@ -748,6 +756,9 @@ void sort_handlers(node& n) {
   }
 }
 
+static std::string methodHEAD = "HEAD ";
+static std::string methodDELETE = "DELETE ";
+static std::string methodPUT = "PUT ";
 static std::string methodGET = "GET ";
 static std::string methodPOST = "POST ";
 
@@ -757,6 +768,15 @@ void server_t::GET(const std::string& path, functor_ ## name fn) { \
 } \
 void server_t::POST(const std::string& path, functor_ ## name fn) { \
   parse_tree(treePOST, path, func_t { .f_ ## name = fn }); \
+} \
+void server_t::HEAD(const std::string& path, functor_ ## name fn) { \
+  parse_tree(treeHEAD, path, func_t { .f_ ## name = fn }); \
+} \
+void server_t::DELETE(const std::string& path, functor_ ## name fn) { \
+  parse_tree(treeDELETE, path, func_t { .f_ ## name = fn }); \
+} \
+void server_t::PUT(const std::string& path, functor_ ## name fn) { \
+  parse_tree(treePUT, path, func_t { .f_ ## name = fn }); \
 }
 
 CLASK_DEFINE_REQUEST(writer)
@@ -898,6 +918,10 @@ void server_t::_run(const std::string& host, int port = 8080) {
 
   sort_handlers(treeGET);
   sort_handlers(treePOST);
+  sort_handlers(treeHEAD);
+  sort_handlers(treeDELETE);
+  sort_handlers(treePUT);
+  sort_handlers(treeANY);
 
 #if 0
   for (auto v : treeGET.children) {

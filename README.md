@@ -2,9 +2,7 @@
 
 ![C/C++ CI](https://github.com/mattn/clask/workflows/C/C++%20CI/badge.svg)
 
-Very Very Experimental Web micro-framework like flask in C++.
-
-*DO NOT USE THIS IN PRODUCTION*
+Web micro-framework like flask in C++.
 
 ## Usage
 
