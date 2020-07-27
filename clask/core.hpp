@@ -999,7 +999,7 @@ retry:
         }
       }
 
-      bool keep_alive = false;
+      bool keep_alive = minor_version == 1;
       bool has_content_length = false;
       size_t content_length = 0;
       for (size_t n = 0; n < num_headers; n++) {
