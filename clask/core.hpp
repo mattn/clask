@@ -1013,6 +1013,8 @@ retry:
           for (auto& c : val) c = (char) std::tolower(c);
           if (val == "keep-alive")
             keep_alive = true;
+          else if (val == "close")
+            keep_alive = false;
         }
         req_headers.emplace_back(std::make_pair(std::move(key), std::move(val)));
       }
