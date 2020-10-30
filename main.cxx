@@ -1,4 +1,4 @@
-//#define CLASK_DISABLE_LOGS
+#define CLASK_DISABLE_LOGS
 #include <clask/core.hpp>
 
 int main() {
