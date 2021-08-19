@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <exception>
 #include <iostream>
@@ -274,7 +275,7 @@ inline std::string part::header_value(const std::string& name) {
   return "";
 }
 
-static std::unordered_map<int, std::string> status_codes = {
+static std::unordered_map<int, std::string_view> status_codes = {
   { 100, "Continue" },
   { 101, "Switching Protocols" },
   { 102, "Processing" },
@@ -335,7 +336,7 @@ static std::unordered_map<int, std::string> status_codes = {
   { 511, "Network Authentication Required" },
 };
 
-static std::unordered_map<std::string, std::string> content_types = {
+static std::unordered_map<std::string, std::string_view> content_types = {
   { ".txt",  "text/plain; charset=utf-8" },
   { ".html", "text/html; charset=utf-8" },
   { ".js",   "text/javascript" },
@@ -365,8 +366,8 @@ public:
   friend std::istream & operator >> (std::istream&, response_writer&);
 };
 
-inline std::unordered_map<std::string, std::string> params(const std::string& s) {
-  std::unordered_map<std::string, std::string> ret;
+inline std::unordered_map<std::string_view, std::string> params(const std::string& s) {
+  std::unordered_map<std::string_view, std::string> ret;
   std::istringstream iss(s);
   std::string keyval, key, val;
   while(std::getline(iss, keyval, '&')) {
@@ -434,14 +435,14 @@ struct request {
   std::string method;
   std::string raw_uri;
   std::string uri;
-  std::unordered_map<std::string, std::string> uri_params;
+  std::unordered_map<std::string_view, std::string_view> uri_params;
   std::vector<header> headers;
   std::string body;
   std::vector<std::string> args;
 
   request(
       std::string method, std::string raw_uri, std::string uri,
-      std::unordered_map<std::string, std::string> uri_params,
+      std::unordered_map<std::string_view, std::string_view> uri_params,
       std::vector<header> headers, std::string body)
     : method(method), raw_uri(std::move(raw_uri)),
       uri(std::move(uri)), uri_params(std::move(uri_params)),
@@ -804,7 +805,7 @@ void serve_file(response_writer& resp, request& req, const std::string& path) {
 
   auto it = content_types.find(fspath.extension().string());
   if (it != content_types.end()) {
-    resp.set_header("content-type", it->second);
+    resp.set_header("content-type", it->second.data());
   }
 
   std::uintmax_t size = std::filesystem::file_size(fspath);
@@ -983,7 +984,7 @@ retry:
       std::string req_path(path, path_len);
       std::string req_body(buf + pret, buflen - pret);
       const std::string req_raw_path = req_path;
-      std::unordered_map<std::string, std::string> req_uri_params;
+      std::unordered_map<std::string_view, std::string_view> req_uri_params;
       std::vector<header> req_headers;
 
       auto pos = req_path.find('?');
