@@ -711,11 +711,11 @@ bool server_t::match(const std::string& method, const std::string& s, std::funct
     for (const auto& vv : n.children) {
       if (vv.placeholder) {
         args.emplace_back(url_decode(sub));
-        n = vv;
+        n = node(vv);
         found = true;
         break;
       } else if (vv.name.empty() || vv.name == sub) {
-        n = vv;
+        n = node(vv);
         found = true;
         break;
       }
