@@ -8,7 +8,7 @@
 #include <fcntl.h>
 
 void test_clask_params() {
-  std::unordered_map<std::string_view, std::string> result;
+  std::unordered_map<std::string, std::string> result;
   result = clask::params("foo");
   _ok(result.size() == 0, R"(result.size() == 0)");
 
