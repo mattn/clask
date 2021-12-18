@@ -708,7 +708,7 @@ bool server_t::match(const std::string& method, const std::string& s, std::funct
       sub = ss.substr(1, pos - 1);
     }
     bool found = false;
-    for (const auto vv : n.children) {
+    for (const auto& vv : n.children) {
       if (vv.placeholder) {
         args.emplace_back(url_decode(sub));
         n = vv;
