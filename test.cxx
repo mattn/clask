@@ -1,4 +1,5 @@
 #include <picotest/picotest.h>
+#undef ok
 #define CLASK_TEST
 #include <clask/core.hpp>
 #include <unordered_map>
@@ -146,12 +147,12 @@ void test_clask_request_uri_param() {
   };
 
   auto s = clask::server();
-  s.GET("/foo/:bar", [](clask::request& req) -> std::string {
+  s.GET("/foo/:bar", [](clask::request& /*req*/) -> std::string {
     return "OK";
   });
   for(auto x : tests) {
     std::vector<std::string> req_args;
-    auto result = s.test_match("GET", x.path, [&](const clask::func_t& fn, const std::vector<std::string>& args) {
+    auto result = s.test_match("GET", x.path, [&](const clask::func_t& /*fn*/, const std::vector<std::string>& args) {
       req_args = args;
     });
     _ok(result == x.result, R"(result == x.result)");
