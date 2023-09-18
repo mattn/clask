@@ -75,12 +75,12 @@ public:
   static log_level& level();
 };
 
-logger& logger::operator =(const logger& l) {
+inline logger& logger::operator =(const logger& l) {
   this->lv = l.lv;
   return *this;
 }
 
-std::ostringstream& logger::get(log_level level) {
+inline std::ostringstream& logger::get(log_level level) {
   auto t = std::time(nullptr);
   auto tm = *std::localtime(&t);
   os << std::put_time(&tm, "%Y/%m/%d %H:%M:%S ");
@@ -95,7 +95,7 @@ std::ostringstream& logger::get(log_level level) {
   return os;
 }
 
-logger::~logger() {
+inline logger::~logger() {
   if (lv >= logger::level()) {
     os << std::endl;
     std::cerr << os.str().c_str();
@@ -217,7 +217,7 @@ typedef struct _part {
   std::string name();
 } part;
 
-std::string part::name() {
+inline std::string part::name() {
   auto cd = header_value("content-disposition");
   while (!cd.empty()) {
     auto pos = cd.find(';');
@@ -236,7 +236,7 @@ std::string part::name() {
   return "";
 }
 
-std::string part::filename() {
+inline std::string part::filename() {
   auto cd = header_value("content-disposition");
   while (!cd.empty()) {
     auto pos = cd.find(';');
@@ -377,11 +377,11 @@ inline std::unordered_map<std::string, std::string> params(const std::string& s)
   return ret;
 }
 
-void response_writer::clear_header() {
+inline void response_writer::clear_header() {
   headers.clear();
 }
 
-void response_writer::set_header(std::string key, const std::string& val) {
+inline void response_writer::set_header(std::string key, const std::string& val) {
   auto h = camelize(key);
   for (auto& hh : headers) {
     if (hh.first == h) {
@@ -392,11 +392,11 @@ void response_writer::set_header(std::string key, const std::string& val) {
   headers.emplace_back(h, val);
 }
 
-void response_writer::write(char* buf, size_t n) {
+inline void response_writer::write(char* buf, size_t n) {
   write(std::string(buf, n));
 }
 
-void response_writer::write_headers() {
+inline void response_writer::write_headers() {
   header_out = true;
   std::ostringstream os;
   os << "HTTP/1.0 " << code << " " << status_codes[code] << "\r\n";
@@ -409,14 +409,14 @@ void response_writer::write_headers() {
   send(s, "\r\n", 2, 0);
 }
 
-void response_writer::write(const std::string& content) {
+inline void response_writer::write(const std::string& content) {
   if (!header_out) {
     write_headers();
   }
   send(s, content.data(), (int) content.size(), 0);
 }
 
-void response_writer::end() {
+inline void response_writer::end() {
   if (!header_out) {
     write_headers();
   }
@@ -451,7 +451,7 @@ struct request {
   std::string cookie_value(const std::string&);
 };
 
-bool request::parse_multipart(std::vector<part>& parts) {
+inline bool request::parse_multipart(std::vector<part>& parts) {
   parts.clear();
 
   auto ct = header_value("content-type");
@@ -578,7 +578,7 @@ typedef struct _func_t {
   int handle(int, request&, bool&) const;
 } func_t;
 
-int func_t::handle(int s, request& req, bool& keep_alive) const {
+inline int func_t::handle(int s, request& req, bool& keep_alive) const {
   int code = 200;
   if (f_string != nullptr) {
     auto res = f_string(req);
@@ -647,7 +647,7 @@ void POST(const std::string&, const functor_ ## name);
 #endif
 };
 
-void server_t::parse_tree(node& n, const std::string& s, const func_t& fn) {
+inline void server_t::parse_tree(node& n, const std::string& s, const func_t& fn) {
   auto pos = s.find('/', 1);
   auto placeholder = s[1] == ':';
   if (pos == std::string::npos) {
@@ -689,7 +689,7 @@ void server_t::parse_tree(node& n, const std::string& s, const func_t& fn) {
   }
 }
 
-bool server_t::match(const std::string& method, const std::string& s, const std::function<void(const func_t& fn, const std::vector<std::string>&)>& fn) const {
+inline bool server_t::match(const std::string& method, const std::string& s, const std::function<void(const func_t& fn, const std::vector<std::string>&)>& fn) const {
   node n = method == "GET" ? treeGET : treePOST;
   std::vector<std::string> args;
   auto ss = s;
@@ -733,7 +733,7 @@ bool server_t::test_match(const std::string& method, const std::string& s, const
 }
 #endif
 
-void sort_handlers(node& n) {
+inline void sort_handlers(node& n) {
   std::sort(
     n.children.begin(),
     n.children.end(),
@@ -745,10 +745,10 @@ void sort_handlers(node& n) {
 }
 
 #define CLASK_DEFINE_REQUEST(name) \
-void server_t::GET(const std::string& path, functor_ ## name fn) { \
+inline void server_t::GET(const std::string& path, functor_ ## name fn) { \
   parse_tree(treeGET, path, func_t { .f_ ## name = std::move(fn) }); \
 } \
-void server_t::POST(const std::string& path, functor_ ## name fn) { \
+inline void server_t::POST(const std::string& path, functor_ ## name fn) { \
   parse_tree(treePOST, path, func_t { .f_ ## name = std::move(fn) }); \
 }
 
@@ -758,7 +758,7 @@ CLASK_DEFINE_REQUEST(response)
 
 #undef CLASK_DEFINE_REQUEST
 
-void serve_dir(response_writer& resp, request& req, const std::string& path) {
+inline void serve_dir(response_writer& resp, request& req, const std::string& path) {
   auto wpath = to_wstring(path);
 
   resp.code = 200;
@@ -782,7 +782,7 @@ void serve_dir(response_writer& resp, request& req, const std::string& path) {
   resp.write("</body>\n</html>\n");
 }
 
-void serve_file(response_writer& resp, request& req, const std::string& path) {
+inline void serve_file(response_writer& resp, request& req, const std::string& path) {
   auto wpath = to_wstring(path);
   std::filesystem::path fspath(wpath.c_str());
 
@@ -831,7 +831,7 @@ void serve_file(response_writer& resp, request& req, const std::string& path) {
   }
 }
 
-void server_t::static_dir(const std::string& path, const std::string& dir, bool listing) {
+inline void server_t::static_dir(const std::string& path, const std::string& dir, bool listing) {
   parse_tree(treeGET, path, func_t {
     .f_writer = [path, dir, listing](response_writer& resp, request& req) {
       std::vector<std::string> paths;
@@ -878,7 +878,7 @@ void server_t::static_dir(const std::string& path, const std::string& dir, bool 
   });
 }
 
-void server_t::_run(const std::string& host, int port = 8080) {
+inline void server_t::_run(const std::string& host, int port = 8080) {
   int server_fd, s;
   struct sockaddr_in address{};
   sockopt_t opt = 1;
@@ -1067,7 +1067,7 @@ retry:
   }
 }
 
-void server_t::run(const std::string& addr) {
+inline void server_t::run(const std::string& addr) {
   auto pos = addr.find_last_of(':');
   if (pos == std::string::npos) {
     throw std::runtime_error("invalid host:port");
@@ -1077,15 +1077,15 @@ void server_t::run(const std::string& addr) {
   _run(host, port);
 }
 
-void server_t::run(int port = 8080) {
+inline void server_t::run(int port = 8080) {
   _run("", port);
 }
 
-server_t server() { return server_t{}; }
+inline server_t server() { return server_t{}; }
 
 log_level logger::default_level = log_level::INFO;
 
-log_level& logger::level() {
+inline log_level& logger::level() {
   return default_level;
 }
 
