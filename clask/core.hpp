@@ -64,7 +64,7 @@ protected:
   log_level lv;
 
 private:
-  logger(const logger&);
+  //logger(const logger&);
   logger& operator =(const logger&);
 
 public:
@@ -88,7 +88,8 @@ std::ostringstream& logger::get(log_level level) {
     case log_level::ERR: os << "ERR: "; break;
     case log_level::WARN: os << "WARN: "; break;
     case log_level::INFO: os << "INFO: "; break;
-    default: os << "DEBUG: "; break;
+    case log_level::DEBUG: os << "DEBUG: "; break;
+    default: break;
   }
   lv = level;
   return os;
@@ -157,14 +158,14 @@ inline std::vector<std::string> split_string(const std::string& s, char delim, s
 inline std::string html_encode(const std::string& value) {
   std::string buf;
   buf.reserve(value.size());
-  for (size_t i = 0; i != value.size(); ++i) {
-    switch (value[i]) {
+  for (const char & c : value) {
+    switch (c) {
       case '&':  buf.append("&amp;");  break;
       case '\"': buf.append("&quot;"); break;
       case '\'': buf.append("&apos;"); break;
       case '<':  buf.append("&lt;");   break;
       case '>':  buf.append("&gt;");   break;
-      default:   buf.append(&value[i], 1); break;
+      default:   buf.append(&c, 1); break;
     }
   }
   return buf;
@@ -174,8 +175,7 @@ inline std::string url_encode(const std::string &value, bool escape_slash = true
   std::ostringstream os;
   os.fill('0');
   os << std::hex;
-  for (auto i = value.begin(), n = value.end(); i != n; ++i) {
-    std::string::value_type c = (*i);
+  for (char c : value) {
     if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
       os << c;
       continue;
@@ -194,7 +194,7 @@ inline std::string url_encode(const std::string &value, bool escape_slash = true
 inline std::string url_decode(const std::string &s) {
   std::string ret;
   const char* p = s.c_str();
-  for (size_t i = 0; *p; i++) {
+  while (*p) {
     if (*p == '%' && p[1] && p[2] && std::isxdigit(p[1]) && std::isxdigit(p[2])) {
       const int hi = p[1] - (p[1] <= '9' ? '0' : (p[1] <= 'F' ? 'A' : 'a') - 10);
       const int lo = p[2] - (p[2] <= '9' ? '0' : (p[2] <= 'F' ? 'A' : 'a') - 10);
@@ -220,7 +220,7 @@ typedef struct _part {
 std::string part::name() {
   auto cd = header_value("content-disposition");
   while (!cd.empty()) {
-    auto pos = cd.find(";");
+    auto pos = cd.find(';');
     if (pos == std::string::npos) {
       pos = cd.size() - 1;
     }
@@ -239,7 +239,7 @@ std::string part::name() {
 std::string part::filename() {
   auto cd = header_value("content-disposition");
   while (!cd.empty()) {
-    auto pos = cd.find(";");
+    auto pos = cd.find(';');
     if (pos == std::string::npos) {
       pos = cd.size() - 1;
     }
@@ -356,13 +356,12 @@ private:
 public:
   response_writer(int s, int code) : s(s), header_out(false), code(code) { }
   int code;
-  void set_header(std::string, std::string);
+  void set_header(std::string, const std::string&);
   void clear_header();
   void write(const std::string&);
   void write(char*, size_t);
   void write_headers();
   void end();
-  friend std::istream & operator >> (std::istream&, response_writer&);
 };
 
 inline std::unordered_map<std::string, std::string> params(const std::string& s) {
@@ -382,7 +381,7 @@ void response_writer::clear_header() {
   headers.clear();
 }
 
-void response_writer::set_header(std::string key, std::string val) {
+void response_writer::set_header(std::string key, const std::string& val) {
   auto h = camelize(key);
   for (auto& hh : headers) {
     if (hh.first == h) {
@@ -390,7 +389,7 @@ void response_writer::set_header(std::string key, std::string val) {
       return;
     }
   }
-  headers.emplace_back(std::make_pair(h, val));
+  headers.emplace_back(h, val);
 }
 
 void response_writer::write(char* buf, size_t n) {
@@ -443,7 +442,7 @@ struct request {
       std::string method, std::string raw_uri, std::string uri,
       std::unordered_map<std::string, std::string> uri_params,
       std::vector<header> headers, std::string body)
-    : method(method), raw_uri(std::move(raw_uri)),
+    : method(std::move(method)), raw_uri(std::move(raw_uri)),
       uri(std::move(uri)), uri_params(std::move(uri_params)),
       headers(std::move(headers)), body(std::move(body)) { }
 
@@ -458,7 +457,7 @@ bool request::parse_multipart(std::vector<part>& parts) {
   auto ct = header_value("content-type");
   std::string boundary;
   while (!ct.empty()) {
-    auto pos = ct.find(";");
+    auto pos = ct.find(';');
     if (pos == std::string::npos) {
       pos = ct.size();
     }
@@ -485,12 +484,10 @@ bool request::parse_multipart(std::vector<part>& parts) {
       if (next == std::string::npos) {
         break;
       }
-      boundary += 4;
-    } else {
-      boundary += 2;
+      boundary += "--";
     }
 
-    auto data = body.substr(pos + boundary.size() + 1, next);
+    auto data = body.substr(pos + boundary.size(), next);
 
     auto eos = data.find("\r\n\r\n");
     if (eos == std::string::npos) {
@@ -516,7 +513,7 @@ bool request::parse_multipart(std::vector<part>& parts) {
       auto val = std::string(hdrs[n].value, hdrs[n].value_len);
       key = url_decode(key);
       val = url_decode(val);
-      req_headers.emplace_back(std::make_pair(std::move(key), std::move(val)));
+      req_headers.emplace_back(std::move(key), std::move(val));
     }
 
     part p = {
@@ -525,10 +522,8 @@ bool request::parse_multipart(std::vector<part>& parts) {
     };
     parts.emplace_back(std::move(p));
     pos = next + boundary.size() + 1;
-    if (body.at(pos) == '-' && body.at(pos + 1) == '-'
-        && body.at(pos + 2) == '\n') {
-      break;
-    } else if (body.at(pos) != '\n') {
+    if ((body.at(pos) == '-' && body.at(pos + 1) == '-'
+        && body.at(pos + 2) == '\n') || body.at(pos) != '\n') {
       break;
     }
   }
@@ -630,8 +625,8 @@ private:
   std::string compiled_tree;
   node treeGET;
   node treePOST;
-  void parse_tree(node&, const std::string&, const func_t);
-  bool match(const std::string&, const std::string&, std::function<void(const func_t& fn, const std::vector<std::string>&)>) const;
+  void parse_tree(node&, const std::string&, const func_t&);
+  bool match(const std::string&, const std::string&, const std::function<void(const func_t& fn, const std::vector<std::string>&)>&) const;
   void _run(const std::string&, int);
 
 public:
@@ -648,11 +643,11 @@ void POST(const std::string&, const functor_ ## name);
   logger log;
   server_t() : treeGET{}, treePOST{} {}
 #ifdef CLASK_TEST
-  bool test_match(const std::string&, const std::string&, std::function<void(const func_t& fn, const std::vector<std::string>&)>) const;
+  bool test_match(const std::string&, const std::string&, const std::function<void(const func_t& fn, const std::vector<std::string>&)>&) const;
 #endif
 };
 
-void server_t::parse_tree(node& n, const std::string& s, const func_t fn) {
+void server_t::parse_tree(node& n, const std::string& s, const func_t& fn) {
   auto pos = s.find('/', 1);
   auto placeholder = s[1] == ':';
   if (pos == std::string::npos) {
@@ -665,11 +660,12 @@ void server_t::parse_tree(node& n, const std::string& s, const func_t fn) {
       }
     }
     if (!found) {
-      n.children.emplace_back(node {
+      node nn =  {
         .name = std::move(sub),
         .fn = fn,
         .placeholder = placeholder,
-      });
+      };
+      n.children.emplace_back(nn);
     }
     return;
   }
@@ -693,7 +689,7 @@ void server_t::parse_tree(node& n, const std::string& s, const func_t fn) {
   }
 }
 
-bool server_t::match(const std::string& method, const std::string& s, std::function<void(const func_t& fn, const std::vector<std::string>&)> fn) const {
+bool server_t::match(const std::string& method, const std::string& s, const std::function<void(const func_t& fn, const std::vector<std::string>&)>& fn) const {
   node n = method == "GET" ? treeGET : treePOST;
   std::vector<std::string> args;
   auto ss = s;
@@ -723,8 +719,8 @@ bool server_t::match(const std::string& method, const std::string& s, std::funct
     if (!found)
       break;
     ss = ss.substr(pos);
-    if (ss.empty() || n.children.size() == 0) {
-      fn(n.fn, std::move(args));
+    if (ss.empty() || n.children.empty()) {
+      fn(n.fn, args);
       return true;
     }
   }
@@ -732,7 +728,7 @@ bool server_t::match(const std::string& method, const std::string& s, std::funct
 }
 
 #ifdef CLASK_TEST
-bool server_t::test_match(const std::string& method, const std::string& s, std::function<void(const func_t& fn, const std::vector<std::string>&)> fn) const {
+bool server_t::test_match(const std::string& method, const std::string& s, const std::function<void(const func_t& fn, const std::vector<std::string>&)>& fn) const {
   return server_t::match(method, s, fn);
 }
 #endif
@@ -748,15 +744,12 @@ void sort_handlers(node& n) {
   }
 }
 
-static std::string methodGET = "GET ";
-static std::string methodPOST = "POST ";
-
 #define CLASK_DEFINE_REQUEST(name) \
 void server_t::GET(const std::string& path, functor_ ## name fn) { \
-  parse_tree(treeGET, path, func_t { .f_ ## name = fn }); \
+  parse_tree(treeGET, path, func_t { .f_ ## name = std::move(fn) }); \
 } \
 void server_t::POST(const std::string& path, functor_ ## name fn) { \
-  parse_tree(treePOST, path, func_t { .f_ ## name = fn }); \
+  parse_tree(treePOST, path, func_t { .f_ ## name = std::move(fn) }); \
 }
 
 CLASK_DEFINE_REQUEST(writer)
@@ -815,7 +808,7 @@ void serve_file(response_writer& resp, request& req, const std::string& path) {
   std::tm *gmt = std::gmtime(&tt);
   for (auto& h : req.headers) {
     if (h.first == "If-Modified-Since") {
-      std::tm file_gmt;
+      std::tm file_gmt{};
       (void) std::get_time(&file_gmt, h.second.c_str());
       if (std::mktime(&file_gmt) <= std::mktime(gmt)) {
         resp.clear_header();
@@ -887,7 +880,7 @@ void server_t::static_dir(const std::string& path, const std::string& dir, bool 
 
 void server_t::_run(const std::string& host, int port = 8080) {
   int server_fd, s;
-  struct sockaddr_in address;
+  struct sockaddr_in address{};
   sockopt_t opt = 1;
   int addrlen = sizeof(address);
 
@@ -1016,7 +1009,7 @@ retry:
           else if (val == "close")
             keep_alive = false;
         }
-        req_headers.emplace_back(std::make_pair(std::move(key), std::move(val)));
+        req_headers.emplace_back(std::move(key), std::move(val));
       }
 
       if (has_content_length && buflen - pret < content_length) {
