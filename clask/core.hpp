@@ -358,11 +358,35 @@ public:
   int code;
   void set_header(std::string, const std::string&);
   void clear_header();
-  void write(const std::string&);
-  void write(char*, size_t);
-  void write_headers();
-  void end();
+  virtual void write(const std::string&);
+  virtual void write(char*, size_t);
+  virtual void write_headers();
+  virtual void end();
 };
+
+class chunked_writer : public response_writer {
+public:
+  chunked_writer(int s, int code) : response_writer(s, code) {
+    set_header("Transfer-Encoding", "chunked");
+  };
+  void write(const std::string& s) {
+    std::stringstream shex;
+    shex << std::hex << s.size();
+    response_writer::write(shex.str() + "\r\n");
+    response_writer::write(s + "\r\n");
+  }
+  void write(char* ptr, size_t len) {
+    std::stringstream shex;
+    shex << std::hex << len;
+    response_writer::write(shex.str() + "\r\n");
+    response_writer::write(ptr, len);
+    response_writer::write("\r\n");
+  }
+  void end() {
+    response_writer::write("0\r\n\r\n");
+  }
+};
+
 
 inline std::unordered_map<std::string, std::string> params(const std::string& s) {
   std::unordered_map<std::string, std::string> ret;
@@ -399,21 +423,21 @@ inline void response_writer::write(char* buf, size_t n) {
 inline void response_writer::write_headers() {
   header_out = true;
   std::ostringstream os;
-  os << "HTTP/1.0 " << code << " " << status_codes[code] << "\r\n";
+  os << "HTTP/1.1 " << code << " " << status_codes[code] << "\r\n";
   auto res_headers = os.str();
-  send(s, res_headers.data(), (int) res_headers.size(), 0);
+  send(s, res_headers.data(), (int) res_headers.size(), MSG_NOSIGNAL);
   for (auto& h : headers) {
     auto hh = h.first + ": " + h.second + "\r\n";
-    send(s, hh.data(), (int) hh.size(), 0);
+    send(s, hh.data(), (int) hh.size(), MSG_NOSIGNAL);
   }
-  send(s, "\r\n", 2, 0);
+  send(s, "\r\n", 2, MSG_NOSIGNAL);
 }
 
 inline void response_writer::write(const std::string& content) {
   if (!header_out) {
     write_headers();
   }
-  send(s, content.data(), (int) content.size(), 0);
+  send(s, content.data(), (int) content.size(), MSG_NOSIGNAL);
 }
 
 inline void response_writer::end() {
@@ -567,11 +591,13 @@ inline std::string request::cookie_value(const std::string& name) {
   return "";
 }
 
+typedef std::function<void(chunked_writer&, request&)> functor_chunked_writer;
 typedef std::function<void(response_writer&, request&)> functor_writer;
 typedef std::function<std::string(request&)> functor_string;
 typedef std::function<response(request&)> functor_response;
 
 typedef struct _func_t {
+  functor_chunked_writer f_chunked_writer;
   functor_writer f_writer;
   functor_string f_string;
   functor_response f_response;
@@ -587,11 +613,16 @@ inline int func_t::handle(int s, request& req, bool& keep_alive) const {
     os << "Connection: " << (keep_alive ? "Keep-Alive" : "Close") << "\r\n";
     os << "Content-Length: " << res.size() << "\r\n\r\n";
     auto res_headers = os.str();
-    send(s, res_headers.data(), (int) res_headers.size(), 0);
-    send(s, res.data(), (int) res.size(), 0);
+    send(s, res_headers.data(), (int) res_headers.size(), MSG_NOSIGNAL);
+    send(s, res.data(), (int) res.size(), MSG_NOSIGNAL);
   } else if (f_writer != nullptr) {
     response_writer writer(s, 200);
     f_writer(writer, req);
+    keep_alive = false;
+    code = writer.code;
+  } else if (f_chunked_writer != nullptr) {
+    chunked_writer writer(s, 200);
+    f_chunked_writer(writer, req);
     keep_alive = false;
     code = writer.code;
   } else if (f_response != nullptr) {
@@ -606,8 +637,7 @@ inline int func_t::handle(int s, request& req, bool& keep_alive) const {
     }
     os << "Content-Length: " << res.content.size() << "\r\n\r\n";
     auto res_headers = os.str();
-    send(s, res_headers.data(), (int) res_headers.size(), 0);
-    send(s, res.content.data(), (int) res.content.size(), 0);
+    send(s, res_headers.data(), (int) res_headers.size(), MSG_NOSIGNAL);
     code = res.code;
   }
   return code;
@@ -633,6 +663,7 @@ public:
 #define CLASK_DEFINE_REQUEST(name) \
 void GET(const std::string&, const functor_ ## name); \
 void POST(const std::string&, const functor_ ## name);
+  CLASK_DEFINE_REQUEST(chunked_writer)
   CLASK_DEFINE_REQUEST(writer)
   CLASK_DEFINE_REQUEST(string)
   CLASK_DEFINE_REQUEST(response)
@@ -752,6 +783,7 @@ inline void server_t::POST(const std::string& path, functor_ ## name fn) { \
   parse_tree(treePOST, path, func_t { .f_ ## name = std::move(fn) }); \
 }
 
+CLASK_DEFINE_REQUEST(chunked_writer)
 CLASK_DEFINE_REQUEST(writer)
 CLASK_DEFINE_REQUEST(string)
 CLASK_DEFINE_REQUEST(response)
@@ -1049,14 +1081,14 @@ retry:
 #endif
           std::ostringstream os;
           os << "HTTP/1.0 " << code << " Internal Server Error\r\nContent-Type: text/plain\r\n\r\nInternal Server Error";
-          send(s, os.str().data(), (int) os.str().size(), 0);
+          send(s, os.str().data(), (int) os.str().size(), MSG_NOSIGNAL);
         }
       })) {
 #ifndef CLASK_DISABLE_LOGS
         logger().get(log_level::WARN) << remote << " " << 404 << " " << req_method << " " << req_path;
 #endif
         static const std::string res_content = "HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\n\r\nNot Found";
-        send(s, res_content.data(), (int) res_content.size(), 0);
+        send(s, res_content.data(), (int) res_content.size(), MSG_NOSIGNAL);
       }
 
       if (keep_alive)
