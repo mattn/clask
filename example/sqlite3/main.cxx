@@ -8,6 +8,17 @@ int main() {
   if (SQLITE_OK != r) {
     throw std::runtime_error("can't open database");
   }
+  std::ifstream file("schema.sql");
+  std::stringstream buf;
+  buf << file.rdbuf();
+  std::string ss = buf.str();
+  char* errmsg = nullptr;
+  r = sqlite3_exec(db, ss.c_str(), nullptr, nullptr, &errmsg);
+  if (SQLITE_OK != r) {
+    ss = errmsg;
+    sqlite3_free(errmsg);
+    throw std::runtime_error("can't execute schema.sql: " + ss);
+  }
 
   inja::Environment env;
   inja::Template temp = env.parse_template("./index.html");
