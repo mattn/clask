@@ -972,7 +972,7 @@ retry:
       ssize_t rret;
 
       while (true) {
-        while ((rret = recv(s, buf + buflen, (int) (sizeof(buf) - buflen), 0)) == -1 && errno == EINTR);
+        while ((rret = recv(s, buf + buflen, (int) (sizeof(buf) - buflen), MSG_NOSIGNAL)) == -1 && errno == EINTR);
         if (rret <= 0) {
           // IOError
           closesocket(s);
@@ -1048,7 +1048,7 @@ retry:
         auto rest = content_length - (buflen - pret);
         buflen = 0;
         while (rest > 0) {
-          while ((rret = recv(s, buf + buflen, (int) (sizeof(buf) - buflen), 0)) == -1 && errno == EINTR);
+          while ((rret = recv(s, buf + buflen, (int) (sizeof(buf) - buflen), MSG_NOSIGNAL)) == -1 && errno == EINTR);
           if (rret <= 0) {
             // IOError
             closesocket(s);
