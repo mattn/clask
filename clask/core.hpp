@@ -364,26 +364,28 @@ public:
   virtual void end();
 };
 
-class chunked_writer : public response_writer {
+class chunked_writer {
+private:
+  response_writer w;
 public:
-  chunked_writer(int s, int code) : response_writer(s, code) {
-    set_header("Transfer-Encoding", "chunked");
+  chunked_writer(response_writer& w) : w(w) {
+    w.set_header("Transfer-Encoding", "chunked");
   };
   void write(const std::string& s) {
     std::stringstream shex;
     shex << std::hex << s.size();
-    response_writer::write(shex.str() + "\r\n");
-    response_writer::write(s + "\r\n");
+    w.write(shex.str() + "\r\n");
+    w.write(s + "\r\n");
   }
   void write(char* ptr, size_t len) {
     std::stringstream shex;
     shex << std::hex << len;
-    response_writer::write(shex.str() + "\r\n");
-    response_writer::write(ptr, len);
-    response_writer::write("\r\n");
+    w.write(shex.str() + "\r\n");
+    w.write(ptr, len);
+    w.write("\r\n");
   }
   void end() {
-    response_writer::write("0\r\n\r\n");
+    w.write("0\r\n\r\n");
   }
 };
 
@@ -591,13 +593,11 @@ inline std::string request::cookie_value(const std::string& name) {
   return "";
 }
 
-typedef std::function<void(chunked_writer&, request&)> functor_chunked_writer;
 typedef std::function<void(response_writer&, request&)> functor_writer;
 typedef std::function<std::string(request&)> functor_string;
 typedef std::function<response(request&)> functor_response;
 
 typedef struct _func_t {
-  functor_chunked_writer f_chunked_writer;
   functor_writer f_writer;
   functor_string f_string;
   functor_response f_response;
@@ -618,11 +618,6 @@ inline int func_t::handle(int s, request& req, bool& keep_alive) const {
   } else if (f_writer != nullptr) {
     response_writer writer(s, 200);
     f_writer(writer, req);
-    keep_alive = false;
-    code = writer.code;
-  } else if (f_chunked_writer != nullptr) {
-    chunked_writer writer(s, 200);
-    f_chunked_writer(writer, req);
     keep_alive = false;
     code = writer.code;
   } else if (f_response != nullptr) {
@@ -663,7 +658,6 @@ public:
 #define CLASK_DEFINE_REQUEST(name) \
 void GET(const std::string&, const functor_ ## name); \
 void POST(const std::string&, const functor_ ## name);
-  CLASK_DEFINE_REQUEST(chunked_writer)
   CLASK_DEFINE_REQUEST(writer)
   CLASK_DEFINE_REQUEST(string)
   CLASK_DEFINE_REQUEST(response)
@@ -783,7 +777,6 @@ inline void server_t::POST(const std::string& path, functor_ ## name fn) { \
   parse_tree(treePOST, path, func_t { .f_ ## name = std::move(fn) }); \
 }
 
-CLASK_DEFINE_REQUEST(chunked_writer)
 CLASK_DEFINE_REQUEST(writer)
 CLASK_DEFINE_REQUEST(string)
 CLASK_DEFINE_REQUEST(response)
