@@ -168,4 +168,5 @@ int main() {
   subtest("test_clask_request_parse_multipart4", test_clask_request_parse_multipart4);
   subtest("test_clask_to_wstring", test_clask_to_wstring);
   subtest("test_clask_request_uri_param", test_clask_request_uri_param);
+  return done_testing();
 }
