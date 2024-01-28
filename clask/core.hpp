@@ -364,6 +364,22 @@ public:
   virtual void end();
 };
 
+class server_sent_event_writer {
+private:
+  response_writer w;
+public:
+  server_sent_event_writer(response_writer& w) : w(w) {
+    w.set_header("Transfer-Encoding", "chunked");
+  };
+  void write(const std::string& event, const std::string& data) {
+    w.write("event: " + event + "\r\n");
+    w.write("data: " + data + "\r\n");
+    w.write("\r\n");
+  }
+  void end() {
+    w.end();
+  }
+};
 class chunked_writer {
 private:
   response_writer w;
@@ -386,9 +402,9 @@ public:
   }
   void end() {
     w.write("0\r\n\r\n");
+    w.end();
   }
 };
-
 
 inline std::unordered_map<std::string, std::string> params(const std::string& s) {
   std::unordered_map<std::string, std::string> ret;

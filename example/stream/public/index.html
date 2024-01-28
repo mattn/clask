@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>demo</title>
+<script>
+window.addEventListener('DOMContentLoaded', function() {
+  const es = new EventSource("/api");
+  es.addEventListener("unko", (ev) => {
+    const unko = JSON.parse(ev.data);
+    const dom = document.querySelector('#container');
+    const e = document.createElement('span');
+    e.textContent = unko;
+    dom.appendChild(e);
+  });
+}, false);
+</script>
+</head>
+<body>
+  <div id="container"></div>
+</body>
+</html>

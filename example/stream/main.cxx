@@ -5,14 +5,15 @@
 int main() {
   auto s = clask::server();
 
-  s.GET("/", [&](clask::response_writer& w, clask::request& r) {
+  s.static_dir("/", "./public");
+  s.GET("/api", [&](clask::response_writer& w, clask::request& r) {
       w.code = 200;
       w.set_header("content-type", "text/event-stream; charset=utf-8");
       w.write_headers();
 
-      clask::chunked_writer ww(w);
+      clask::server_sent_event_writer ww(w);
       for (int n = 0; n < 100; n++) {
-        ww.write("💩");
+        ww.write("unko", R"("💩")");
         usleep(100000);
       }
       ww.end();
