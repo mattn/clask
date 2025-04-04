@@ -5,6 +5,15 @@ project (clask
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
+option(BUILD_STATIC "Build static binaries" ON)
+
+if(BUILD_STATIC)
+  message(STATUS "Static build enabled")
+  set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
+  set(BUILD_SHARED_LIBS OFF)
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static")
+endif()
+
 if(MSVC_VERSION GREATER_EQUAL "1900")
   include(CheckCXXCompilerFlag)
   CHECK_CXX_COMPILER_FLAG("/std:c++latest" _cpp_latest_flag_supported)
