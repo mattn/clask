@@ -5,6 +5,7 @@ add_subdirectory (login)
 add_subdirectory (static)
 add_subdirectory (upload)
 add_subdirectory (stream)
+add_subdirectory (file)
 
 find_package (SQLITE3)
 if (SQLITE3_FOUND)
