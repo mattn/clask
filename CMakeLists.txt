@@ -5,7 +5,7 @@ project (clask
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-option(BUILD_STATIC "Build static binaries" ON)
+option(BUILD_STATIC "Build static binaries" OFF)
 
 if(BUILD_STATIC)
   message(STATUS "Static build enabled")

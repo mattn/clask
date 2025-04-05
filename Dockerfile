@@ -9,9 +9,10 @@ RUN apt-get update && \
 ENV CC=/usr/bin/gcc \
     CXX=/usr/bin/g++
 
-RUN mkdir build && cd build && cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_STATIC=ON -DCMAKE_CXX_FLAGS="-Werror" .. && make example-file
+RUN cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --target example-file
 
-FROM scratch
+FROM bitnami/minideb:bookworm
 
+RUN mkdir -p /app/public
 COPY --from=build-dev /app/src/build/example/file/example-file /app/file
 ENTRYPOINT ["/app/file"]
