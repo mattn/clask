@@ -1,9 +1,10 @@
 #include <clask/core.hpp>
+#include <clask/version.h>
 #include <argparse/argparse.hpp>
 #include <iostream>
 
 int main(int argc, char* argv[]) {
-  argparse::ArgumentParser program("file", "0.0.0");
+  argparse::ArgumentParser program("file", CLASK_VERSION);
   program.add_argument("-dir")
       .default_value("./public")
       .help("public directory")
