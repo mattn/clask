@@ -6,10 +6,6 @@
 #define _SILENCE_ALL_CXX17_DEPRECATION_WARNINGS
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
 
-#ifndef MSG_NOSIGNAL
-#  define MSG_NOSIGNAL 0
-#endif
-
 #include <algorithm>
 #include <functional>
 #include <utility>
@@ -56,6 +52,10 @@ typedef int sockopt_t;
 
 #include "picohttpparser.h"
 #include "picohttpparser.c"
+
+#ifndef MSG_NOSIGNAL
+#  define MSG_NOSIGNAL 0
+#endif
 
 namespace clask {
 
