@@ -1,0 +1,9 @@
+-std=c++17
+-I../..
+-I.
+-Ic:/msys64/mingw64/include
+-Ic:/msys64/mingw64/include/c++
+-Ic:/msys64/mingw64/x86_64-w64-mingw32/include
+-Ic:/msys64/mingw64/include/c++/10.1.0
+-IC:/msys64/mingw64/include/c++/10.1.0/x86_64-w64-mingw32
+
