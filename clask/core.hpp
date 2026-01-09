@@ -31,7 +31,7 @@ inline static void socket_perror(const char *s) {
       buf,
       sizeof(buf) / sizeof(buf[0]),
       nullptr);
-  std::cerr << s << ": " << buf << std::endl;
+  std::cerr << s << ": " << buf << "\n";
 }
 typedef char sockopt_t;
 #else
@@ -62,6 +62,7 @@ class logger {
 protected:
   std::ostringstream os;
   log_level lv;
+  bool enabled;
 
 private:
   //logger(const logger&);
@@ -69,7 +70,7 @@ private:
 
 public:
   static log_level default_level;
-  logger() : lv(clask::log_level::INFO) {};
+  logger() : lv(clask::log_level::INFO), enabled(false) {};
   virtual ~logger();
   std::ostringstream& get(log_level level = log_level::INFO);
   static log_level& level();
@@ -81,26 +82,33 @@ inline logger& logger::operator =(const logger& l) {
 }
 
 inline std::ostringstream& logger::get(log_level level) {
-  auto t = std::time(nullptr);
-  auto tm = *std::localtime(&t);
-  os << std::put_time(&tm, "%Y/%m/%d %H:%M:%S ");
-  switch (level) {
-    case log_level::ERR: os << "ERR: "; break;
-    case log_level::WARN: os << "WARN: "; break;
-    case log_level::INFO: os << "INFO: "; break;
-    case log_level::DEBUG: os << "DEBUG: "; break;
-    default: break;
-  }
   lv = level;
+  enabled = (lv >= logger::level());
+  if (enabled) {
+    auto t = std::time(nullptr);
+    auto tm = *std::localtime(&t);
+    os << std::put_time(&tm, "%Y/%m/%d %H:%M:%S ");
+    switch (level) {
+      case log_level::ERR: os << "ERR: "; break;
+      case log_level::WARN: os << "WARN: "; break;
+      case log_level::INFO: os << "INFO: "; break;
+      case log_level::DEBUG: os << "DEBUG: "; break;
+      default: break;
+    }
+  }
   return os;
 }
 
 inline logger::~logger() {
-  if (lv >= logger::level()) {
-    os << std::endl;
-    std::cerr << os.str().c_str();
+  if (enabled) {
+    os << "\n";
+    std::cerr << os.str();
   }
 }
+
+#define CLASK_LOG(lvl) \
+  if (lvl < clask::logger::level()) ; \
+  else clask::logger().get(lvl)
 
 template <typename TP>
 std::time_t to_time_t(TP tp) {
@@ -141,7 +149,8 @@ inline std::string camelize(std::string& s) {
   for (size_t i = 0; i < n; i++) {
     if (i == 0 || s[i - 1] == ' ' || s[i - 1] == '-') {
       s[i] = (char) std::toupper(s[i]);
-      continue;
+    } else {
+      s[i] = (char) std::tolower(s[i]);
     }
   }
   return s.substr(0, n);
@@ -238,7 +247,7 @@ inline std::string part::name() {
     }
     auto sub = cd.substr(0, pos);
     trim_string(sub, " \t");
-    if (sub.substr(0, 5) == "name=") {
+    if (sub.size() >= 5 && sub.substr(0, 5) == "name=") {
       sub = sub.substr(5);
       trim_string(sub, "\"");
       return sub;
@@ -257,15 +266,15 @@ inline std::string part::filename() {
     }
     auto sub = cd.substr(0, pos);
     trim_string(sub, " \t");
-    if (sub.substr(0, 9) == "filename=") {
+    if (sub.size() >= 9 && sub.substr(0, 9) == "filename=") {
       sub = sub.substr(9);
       trim_string(sub, "\"");
       return sub;
     }
-    if (sub.substr(0, 10) == "filename*=") {
+    if (sub.size() >= 10 && sub.substr(0, 10) == "filename*=") {
       sub = sub.substr(10);
       for (auto& c : sub) c = (char) std::tolower(c);
-      if (sub.substr(0, 7) == "utf-8''") {
+      if (sub.size() >= 7 && sub.substr(0, 7) == "utf-8''") {
         sub = url_decode(sub.substr(7));
         trim_string(sub, "\"");
         return sub;
@@ -517,7 +526,7 @@ inline bool request::parse_multipart(std::vector<part>& parts) {
     }
     auto sub = ct.substr(0, pos);
     trim_string(sub, " \t");
-    if (sub.substr(0, 9) == "boundary=") {
+    if (sub.size() >= 9 && sub.substr(0, 9) == "boundary=") {
       sub = sub.substr(9);
       trim_string(sub, "\"");
       boundary = sub;
@@ -1020,14 +1029,14 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
           if (pret == -1) {
             // ParseError
 #ifndef CLASK_DISABLE_LOGS
-            logger().get(log_level::ERR) << "invalid request";
+            CLASK_LOG(clask::log_level::ERR) << "invalid request";
 #endif
             return;
           }
           if (buflen == sizeof(buf)) {
             // RequestIsTooLongError
 #ifndef CLASK_DISABLE_LOGS
-            logger().get(log_level::ERR) << "request is too long";
+            CLASK_LOG(clask::log_level::ERR) << "request is too long";
 #endif
             continue;
           }
@@ -1102,11 +1111,11 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
           try {
             code = fn.handle(s, req, keep_alive);
 #ifndef CLASK_DISABLE_LOGS
-            logger().get(log_level::INFO) << remote << " " << code << " " << req_method << " " << req_path;
+            CLASK_LOG(clask::log_level::INFO) << remote << " " << code << " " << req_method << " " << req_path;
 #endif
           } catch (std::exception&) {
 #ifndef CLASK_DISABLE_LOGS
-            logger().get(log_level::WARN) << remote << " " << code << " " << req_method << " " << req_path;
+            CLASK_LOG(clask::log_level::WARN) << remote << " " << code << " " << req_method << " " << req_path;
 #endif
             std::ostringstream os;
             os << "HTTP/1.0 " << code << " Internal Server Error\r\nContent-Type: text/plain\r\n\r\nInternal Server Error";
@@ -1114,7 +1123,7 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
           }
         })) {
 #ifndef CLASK_DISABLE_LOGS
-          logger().get(log_level::WARN) << remote << " " << 404 << " " << req_method << " " << req_path;
+          CLASK_LOG(clask::log_level::WARN) << remote << " " << 404 << " " << req_method << " " << req_path;
 #endif
           static const std::string res_content = "HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\n\r\nNot Found";
           send(s, res_content.data(), (int) res_content.size(), MSG_NOSIGNAL);
