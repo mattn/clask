@@ -1023,7 +1023,7 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
       bool keep_connection_alive = true;
       while (keep_connection_alive) {
         keep_connection_alive = false;
-        char buf[4096];
+        char buf[16384];
         const char *method, *path;
         int pret, minor_version;
         struct phr_header headers[100];
