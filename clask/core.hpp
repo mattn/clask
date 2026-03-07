@@ -755,37 +755,37 @@ inline void server_t::parse_tree(node& n, const std::string& s, const func_t& fn
 }
 
 inline bool server_t::match(const std::string& method, const std::string& s, const std::function<void(const func_t& fn, const std::vector<std::string>&)>& fn) const {
-  node n = method == "GET" ? treeGET : treePOST;
+  const node* n = method == "GET" ? &treeGET : &treePOST;
   std::vector<std::string> args;
-  auto ss = s;
-  std::string sub;
-  while (true) {
-    auto pos = ss.find('/', 1);
+  size_t offset = 0;
+  while (offset < s.size()) {
+    auto pos = s.find('/', offset + 1);
 
+    std::string sub;
     if (pos == std::string::npos) {
-      sub = ss.substr(1);
-      pos = ss.size();
+      sub = s.substr(offset + 1);
+      pos = s.size();
     } else {
-      sub = ss.substr(1, pos - 1);
+      sub = s.substr(offset + 1, pos - offset - 1);
     }
     bool found = false;
-    for (const auto& vv : n.children) {
+    for (const auto& vv : n->children) {
       if (vv.placeholder) {
         args.emplace_back(url_decode(sub));
-        n = node(vv);
+        n = &vv;
         found = true;
         break;
       } else if (vv.name.empty() || vv.name == sub) {
-        n = node(vv);
+        n = &vv;
         found = true;
         break;
       }
     }
     if (!found)
       break;
-    ss = ss.substr(pos);
-    if (ss.empty() || n.children.empty()) {
-      fn(n.fn, args);
+    offset = pos;
+    if (offset >= s.size() || n->children.empty()) {
+      fn(n->fn, args);
       return true;
     }
   }
