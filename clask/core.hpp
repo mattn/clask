@@ -456,20 +456,29 @@ inline void response_writer::set_header(std::string key, const std::string& val)
 }
 
 inline void response_writer::write(char* buf, size_t n) {
-  write(std::string(buf, n));
+  if (!header_out) {
+    write_headers();
+  }
+  send(s, buf, (int) n, MSG_NOSIGNAL);
 }
 
 inline void response_writer::write_headers() {
   header_out = true;
-  std::ostringstream os;
-  os << "HTTP/1.1 " << code << " " << status_codes[code] << "\r\n";
-  auto res_headers = os.str();
-  send(s, res_headers.data(), (int) res_headers.size(), MSG_NOSIGNAL);
+  std::string buf;
+  buf.reserve(256);
+  buf += "HTTP/1.1 ";
+  buf += std::to_string(code);
+  buf += " ";
+  buf += status_codes[code];
+  buf += "\r\n";
   for (auto& h : headers) {
-    auto hh = h.first + ": " + h.second + "\r\n";
-    send(s, hh.data(), (int) hh.size(), MSG_NOSIGNAL);
+    buf += h.first;
+    buf += ": ";
+    buf += h.second;
+    buf += "\r\n";
   }
-  send(s, "\r\n", 2, MSG_NOSIGNAL);
+  buf += "\r\n";
+  send(s, buf.data(), (int) buf.size(), MSG_NOSIGNAL);
 }
 
 inline void response_writer::write(const std::string& content) {
