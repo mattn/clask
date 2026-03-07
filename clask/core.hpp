@@ -654,13 +654,15 @@ inline int func_t::handle(int s, request& req, bool& keep_alive) const {
   int code = 200;
   if (f_string != nullptr) {
     auto res = f_string(req);
-    std::ostringstream os;
-    os << "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=UTF-8\r\n";
-    os << "Connection: " << (keep_alive ? "Keep-Alive" : "Close") << "\r\n";
-    os << "Content-Length: " << res.size() << "\r\n\r\n";
-    auto res_headers = os.str();
-    send(s, res_headers.data(), (int) res_headers.size(), MSG_NOSIGNAL);
-    send(s, res.data(), (int) res.size(), MSG_NOSIGNAL);
+    std::string hdr;
+    hdr.reserve(128 + res.size());
+    hdr += "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=UTF-8\r\nConnection: ";
+    hdr += keep_alive ? "Keep-Alive" : "Close";
+    hdr += "\r\nContent-Length: ";
+    hdr += std::to_string(res.size());
+    hdr += "\r\n\r\n";
+    hdr += res;
+    send(s, hdr.data(), (int) hdr.size(), MSG_NOSIGNAL);
   } else if (f_writer != nullptr) {
     response_writer writer(s, 200);
     f_writer(writer, req);
@@ -668,17 +670,27 @@ inline int func_t::handle(int s, request& req, bool& keep_alive) const {
     code = writer.code;
   } else if (f_response != nullptr) {
     auto res = f_response(req);
-    std::ostringstream os;
-    os << "HTTP/1.1 " << res.code << " " << status_codes[res.code] << "\r\n";
+    std::string hdr;
+    hdr.reserve(256 + res.content.size());
+    hdr += "HTTP/1.1 ";
+    hdr += std::to_string(res.code);
+    hdr += " ";
+    hdr += status_codes[res.code];
+    hdr += "\r\n";
     for (auto& h : res.headers) {
       auto key = camelize(h.first);
       if (key == "Content-Length")
         continue;
-      os << key + ": " + h.second + "\r\n";
+      hdr += key;
+      hdr += ": ";
+      hdr += h.second;
+      hdr += "\r\n";
     }
-    os << "Content-Length: " << res.content.size() << "\r\n\r\n";
-    auto res_headers = os.str();
-    send(s, res_headers.data(), (int) res_headers.size(), MSG_NOSIGNAL);
+    hdr += "Content-Length: ";
+    hdr += std::to_string(res.content.size());
+    hdr += "\r\n\r\n";
+    hdr += res.content;
+    send(s, hdr.data(), (int) hdr.size(), MSG_NOSIGNAL);
     code = res.code;
   }
   return code;
