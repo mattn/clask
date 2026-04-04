@@ -263,6 +263,12 @@ void test_clask_static_path_resolution() {
     _ok(result.matched == true, R"(result.matched == true)");
     _ok(result.forbidden == true, R"(result.forbidden == true)");
   }
+  {
+    auto result = clask::resolve_static_path("/static/dir/", "/static/", "./public");
+    _ok(result.matched == true, R"(result.matched == true)");
+    _ok(result.forbidden == false, R"(result.forbidden == false)");
+    _ok(result.path == "./public/dir/", R"(result.path == "./public/dir/")");
+  }
 }
 
 int main() {

@@ -1737,15 +1737,11 @@ inline void server_t::static_dir(const std::string& path, const std::string& dir
     func.f_writer = [path, dir, listing](response_writer& resp, request& req) {
       auto resolved = resolve_static_path(req.uri, path, dir);
       if (resolved.forbidden) {
-        resp.code = 403;
-        resp.set_header("content-type", "text/plain");
-        resp.write("Forbidden");
+        write_plain_text_response(resp, 403, "Forbidden");
         return;
       }
       if (!resolved.matched) {
-        resp.code = 404;
-        resp.set_header("content-type", "text/plain");
-        resp.write("Not Found");
+        write_plain_text_response(resp, 404, "Not Found");
         return;
       }
 
