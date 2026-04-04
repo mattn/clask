@@ -1382,6 +1382,8 @@ private:
   int socket_timeout_ms_;
   node& route_tree(const std::string&);
   const node& route_tree(const std::string&) const;
+  template <typename Functor>
+  void register_route(const std::string&, const std::string&, Functor&&);
   void parse_tree(node&, const std::string&, const func_t&);
   bool match(const std::string&, const std::string&, const std::function<void(const func_t& fn, const std::vector<std::string>&)>&) const;
   bool handle_connection_socket(int, const std::string&, const server_runtime_config&) const;
@@ -1574,16 +1576,26 @@ inline void prepare_handler_trees(node& treeGET, node& treePOST) {
 #endif
 }
 
+template <typename Functor>
+inline void server_t::register_route(
+    const std::string& method,
+    const std::string& path,
+    Functor&& assign_functor) {
+  func_t func{};
+  assign_functor(func);
+  parse_tree(route_tree(method), path, func);
+}
+
 #define CLASK_DEFINE_REQUEST(name) \
 inline void server_t::GET(const std::string& path, functor_ ## name fn) { \
-  func_t func{}; \
-  func.f_ ## name = std::move(fn); \
-  parse_tree(route_tree("GET"), path, func); \
+  register_route("GET", path, [&](func_t& func) { \
+    func.f_ ## name = std::move(fn); \
+  }); \
 } \
 inline void server_t::POST(const std::string& path, functor_ ## name fn) { \
-  func_t func{}; \
-  func.f_ ## name = std::move(fn); \
-  parse_tree(route_tree("POST"), path, func); \
+  register_route("POST", path, [&](func_t& func) { \
+    func.f_ ## name = std::move(fn); \
+  }); \
 }
 
 CLASK_DEFINE_REQUEST(writer)
@@ -1667,34 +1679,34 @@ inline void serve_file(response_writer& resp, request& req, const std::string& p
 }
 
 inline void server_t::static_dir(const std::string& path, const std::string& dir, bool listing) {
-  func_t func{};
-  func.f_writer = [path, dir, listing](response_writer& resp, request& req) {
-    auto resolved = resolve_static_path(req.uri, path, dir);
-    if (resolved.forbidden) {
-      resp.code = 403;
-      resp.set_header("content-type", "text/plain");
-      resp.write("Forbidden");
-      return;
-    }
-    if (!resolved.matched) {
-      resp.code = 404;
-      resp.set_header("content-type", "text/plain");
-      resp.write("Not Found");
-      return;
-    }
-
-    auto req_path = std::move(resolved.path);
-    if (!req_path.empty() && req_path[req_path.size() - 1] == '/') {
-      if (listing) {
-        serve_dir(resp, req, req_path);
+  register_route("GET", path, [&](func_t& func) {
+    func.f_writer = [path, dir, listing](response_writer& resp, request& req) {
+      auto resolved = resolve_static_path(req.uri, path, dir);
+      if (resolved.forbidden) {
+        resp.code = 403;
+        resp.set_header("content-type", "text/plain");
+        resp.write("Forbidden");
         return;
       }
-      req_path += "index.html";
-    }
+      if (!resolved.matched) {
+        resp.code = 404;
+        resp.set_header("content-type", "text/plain");
+        resp.write("Not Found");
+        return;
+      }
 
-    serve_file(resp, req, req_path);
-  };
-  parse_tree(route_tree("GET"), path, func);
+      auto req_path = std::move(resolved.path);
+      if (!req_path.empty() && req_path[req_path.size() - 1] == '/') {
+        if (listing) {
+          serve_dir(resp, req, req_path);
+          return;
+        }
+        req_path += "index.html";
+      }
+
+      serve_file(resp, req, req_path);
+    };
+  });
 }
 
 inline void server_t::_run(const std::string& host, int port = 8080) {
