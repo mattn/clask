@@ -200,6 +200,21 @@ inline bool accept_connection(
   return true;
 }
 
+inline void send_text_response(
+    int s,
+    int code,
+    const std::string& reason,
+    const std::string& body,
+    bool keep_alive) {
+  std::ostringstream os;
+  os << "HTTP/1.1 " << code << " " << reason
+     << "\r\nContent-Type: text/plain\r\nConnection: "
+     << (keep_alive ? "Keep-Alive" : "Close")
+     << "\r\nContent-Length: " << body.size()
+     << "\r\n\r\n" << body;
+  send(s, os.str().data(), (int) os.str().size(), MSG_NOSIGNAL);
+}
+
 
 typedef enum class _log_level {ERR, WARN, INFO, DEBUG} log_level;
 
@@ -1346,16 +1361,6 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
       closesocket(s);
       return false;
     }
-
-    auto send_text_response = [&](int code, const std::string& reason, const std::string& body, bool keep_alive) {
-      std::ostringstream os;
-      os << "HTTP/1.1 " << code << " " << reason
-         << "\r\nContent-Type: text/plain\r\nConnection: "
-         << (keep_alive ? "Keep-Alive" : "Close")
-         << "\r\nContent-Length: " << body.size()
-         << "\r\n\r\n" << body;
-      send(s, os.str().data(), (int) os.str().size(), MSG_NOSIGNAL);
-    };
     auto read_result = read_request_from_socket(s);
     if (!read_result.ok) {
 #ifndef CLASK_DISABLE_LOGS
