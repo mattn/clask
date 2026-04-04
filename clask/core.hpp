@@ -296,6 +296,18 @@ inline void start_worker_pool(
   }
 }
 
+inline void enqueue_ready_connection(
+    std::mutex& ready_queue_mu,
+    std::condition_variable& ready_queue_cv,
+    std::deque<connection_state>& ready_queue,
+    connection_state conn) {
+  {
+    std::lock_guard<std::mutex> lk(ready_queue_mu);
+    ready_queue.emplace_back(std::move(conn));
+  }
+  ready_queue_cv.notify_one();
+}
+
 inline void drain_completed_connections(
     std::mutex& completed_queue_mu,
     std::deque<completed_connection>& completed_queue,
@@ -311,6 +323,63 @@ inline void drain_completed_connections(
       idle_connections.emplace(conn.conn.fd, std::move(conn.conn));
     } else {
       tracked_connections--;
+    }
+  }
+}
+
+inline void accept_ready_connection(
+    int server_fd,
+    size_t accept_queue_limit,
+    std::atomic<size_t>& tracked_connections,
+    std::mutex& ready_queue_mu,
+    std::condition_variable& ready_queue_cv,
+    std::deque<connection_state>& ready_queue) {
+  if (tracked_connections.load() >= accept_queue_limit) {
+    connection_state conn{};
+    if (accept_connection(server_fd, conn)) {
+      send_service_unavailable_response(conn.fd);
+      closesocket(conn.fd);
+    }
+    return;
+  }
+
+  connection_state conn{};
+  if (!accept_connection(server_fd, conn)) {
+    throw std::runtime_error("accept");
+  }
+  tracked_connections++;
+  enqueue_ready_connection(
+      ready_queue_mu,
+      ready_queue_cv,
+      ready_queue,
+      std::move(conn));
+}
+
+inline void requeue_readable_idle_connections(
+    const std::vector<socket_wait_event>& events,
+    std::unordered_map<int, connection_state>& idle_connections,
+    std::atomic<size_t>& tracked_connections,
+    std::mutex& ready_queue_mu,
+    std::condition_variable& ready_queue_cv,
+    std::deque<connection_state>& ready_queue) {
+  for (const auto& event : events) {
+    auto it = idle_connections.find(event.fd);
+    if (it == idle_connections.end()) {
+      continue;
+    }
+    if (event.closed) {
+      closesocket(it->first);
+      tracked_connections--;
+      idle_connections.erase(it);
+      continue;
+    }
+    if (event.readable) {
+      enqueue_ready_connection(
+          ready_queue_mu,
+          ready_queue_cv,
+          ready_queue,
+          std::move(it->second));
+      idle_connections.erase(it);
     }
   }
 }
@@ -1543,44 +1612,22 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
     }
 
     if (wait_result.server_readable) {
-      if (tracked_connections.load() >= accept_queue_limit) {
-        connection_state conn{};
-        if (accept_connection(server_fd, conn)) {
-          send_service_unavailable_response(conn.fd);
-          closesocket(conn.fd);
-        }
-      } else {
-        connection_state conn{};
-        if (!accept_connection(server_fd, conn)) {
-          throw std::runtime_error("accept");
-        }
-        tracked_connections++;
-        {
-          std::lock_guard<std::mutex> lk(ready_queue_mu);
-          ready_queue.emplace_back(std::move(conn));
-        }
-        ready_queue_cv.notify_one();
-      }
+      accept_ready_connection(
+          server_fd,
+          accept_queue_limit,
+          tracked_connections,
+          ready_queue_mu,
+          ready_queue_cv,
+          ready_queue);
     }
 
-    for (const auto& event : wait_result.events) {
-      auto it = idle_connections.find(event.fd);
-      if (it == idle_connections.end()) {
-        continue;
-      }
-      if (event.closed) {
-        closesocket(it->first);
-        tracked_connections--;
-        idle_connections.erase(it);
-        continue;
-      }
-      if (event.readable) {
-        std::lock_guard<std::mutex> lk(ready_queue_mu);
-        ready_queue.emplace_back(std::move(it->second));
-        idle_connections.erase(it);
-        ready_queue_cv.notify_one();
-      }
-    }
+    requeue_readable_idle_connections(
+        wait_result.events,
+        idle_connections,
+        tracked_connections,
+        ready_queue_mu,
+        ready_queue_cv,
+        ready_queue);
   }
 }
 
