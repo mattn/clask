@@ -173,6 +173,10 @@ void test_clask_post_route_match() {
   _ok(result == true, R"(result == true)");
   _ok(req_args.size() == 1, R"(req_args.size() == 1)");
   _ok(req_args[0] == "42", R"(req_args[0] == "42")");
+
+  auto invalid = s.test_match("PUT", "/submit/42", [&](const clask::func_t& /*fn*/, const std::vector<std::string>& /*args*/) {
+  });
+  _ok(invalid == false, R"(invalid == false)");
 }
 
 void test_clask_parse_listen_address() {

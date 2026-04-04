@@ -1395,8 +1395,8 @@ private:
   unsigned int worker_count_;
   size_t accept_queue_limit_;
   int socket_timeout_ms_;
-  node& route_tree(const std::string&);
-  const node& route_tree(const std::string&) const;
+  node* route_tree(const std::string&);
+  const node* route_tree(const std::string&) const;
   template <typename Functor>
   void register_route(const std::string&, const std::string&, Functor&&);
   void parse_tree(node&, const std::string&, const func_t&);
@@ -1458,12 +1458,24 @@ inline server_t&& server_t::socket_timeout(int v) && {
   return std::move(*this);
 }
 
-inline node& server_t::route_tree(const std::string& method) {
-  return method == "GET" ? treeGET : treePOST;
+inline node* server_t::route_tree(const std::string& method) {
+  if (method == "GET") {
+    return &treeGET;
+  }
+  if (method == "POST") {
+    return &treePOST;
+  }
+  return nullptr;
 }
 
-inline const node& server_t::route_tree(const std::string& method) const {
-  return method == "GET" ? treeGET : treePOST;
+inline const node* server_t::route_tree(const std::string& method) const {
+  if (method == "GET") {
+    return &treeGET;
+  }
+  if (method == "POST") {
+    return &treePOST;
+  }
+  return nullptr;
 }
 
 inline void server_t::parse_tree(node& n, const std::string& s, const func_t& fn) {
@@ -1512,7 +1524,10 @@ inline void server_t::parse_tree(node& n, const std::string& s, const func_t& fn
 }
 
 inline bool server_t::match(const std::string& method, const std::string& s, const std::function<void(const func_t& fn, const std::vector<std::string>&)>& fn) const {
-  const node* n = &route_tree(method);
+  const node* n = route_tree(method);
+  if (n == nullptr) {
+    return false;
+  }
   std::vector<std::string> args;
   size_t offset = 0;
   while (offset < s.size()) {
@@ -1596,9 +1611,13 @@ inline void server_t::register_route(
     const std::string& method,
     const std::string& path,
     Functor&& assign_functor) {
+  auto tree = route_tree(method);
+  if (tree == nullptr) {
+    throw std::runtime_error("unsupported method");
+  }
   func_t func{};
   assign_functor(func);
-  parse_tree(route_tree(method), path, func);
+  parse_tree(*tree, path, func);
 }
 
 #define CLASK_DEFINE_REQUEST(name) \
