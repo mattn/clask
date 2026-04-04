@@ -1449,8 +1449,8 @@ typedef struct _node {
 class server_t {
 private:
   std::string compiled_tree;
-  node treeGET;
-  node treePOST;
+  node get_routes_;
+  node post_routes_;
   unsigned int worker_count_;
   size_t accept_queue_limit_;
   int socket_timeout_ms_;
@@ -1481,7 +1481,7 @@ void POST(const std::string&, const functor_ ## name);
   void run(const std::string&);
   void run(int);
   logger log;
-  server_t() : treeGET{}, treePOST{}, worker_count_{0}, accept_queue_limit_{0}, socket_timeout_ms_{keep_alive_timeout_ms} {}
+  server_t() : get_routes_{}, post_routes_{}, worker_count_{0}, accept_queue_limit_{0}, socket_timeout_ms_{keep_alive_timeout_ms} {}
 #ifdef CLASK_TEST
   bool test_match(const std::string&, const std::string&, const std::function<void(const func_t& fn, const std::vector<std::string>&)>&) const;
 #endif
@@ -1519,20 +1519,20 @@ inline server_t&& server_t::socket_timeout(int v) && {
 
 inline node* server_t::route_tree(route_method method) {
   if (method == route_method::get) {
-    return &treeGET;
+    return &get_routes_;
   }
   if (method == route_method::post) {
-    return &treePOST;
+    return &post_routes_;
   }
   return nullptr;
 }
 
 inline const node* server_t::route_tree(route_method method) const {
   if (method == route_method::get) {
-    return &treeGET;
+    return &get_routes_;
   }
   if (method == route_method::post) {
-    return &treePOST;
+    return &post_routes_;
   }
   return nullptr;
 }
@@ -1646,12 +1646,12 @@ inline void sort_handlers(node& n) {
   }
 }
 
-inline void prepare_handler_trees(node& treeGET, node& treePOST) {
-  sort_handlers(treeGET);
-  sort_handlers(treePOST);
+inline void prepare_handler_trees(node& get_routes, node& post_routes) {
+  sort_handlers(get_routes);
+  sort_handlers(post_routes);
 
 #if 0
-  for (auto v : treeGET.children) {
+  for (auto v : get_routes.children) {
     std::cout << v.name << std::endl;
     std::cout << v.placeholder << std::endl;
   }
@@ -1783,7 +1783,7 @@ inline void server_t::static_dir(const std::string& path, const std::string& dir
 
 inline void server_t::_run(const std::string& host, int port = 8080) {
   initialize_network_runtime();
-  prepare_handler_trees(treeGET, treePOST);
+  prepare_handler_trees(get_routes_, post_routes_);
 
   auto server_fd = create_listening_socket(host, port);
   auto config = resolve_server_runtime_config(
