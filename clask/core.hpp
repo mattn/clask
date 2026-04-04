@@ -1303,6 +1303,7 @@ typedef struct _func_t {
   functor_writer f_writer;
   functor_string f_string;
   functor_response f_response;
+  bool prefix_match;
   int handle(int, request&, bool&) const;
 } func_t;
 
@@ -1574,6 +1575,8 @@ inline void server_t::parse_tree(node& n, const std::string& s, const func_t& fn
 inline bool server_t::match(route_method method, const std::string& s, const std::function<void(const func_t& fn, const std::vector<std::string>&)>& fn) const {
   const node* n = &route_tree(method);
   std::vector<std::string> args;
+  const func_t* prefix_fn = nullptr;
+  std::vector<std::string> prefix_args;
   size_t offset = 0;
   while (offset < s.size()) {
     auto segment = parse_path_segment(s, offset);
@@ -1593,10 +1596,18 @@ inline bool server_t::match(route_method method, const std::string& s, const std
     if (!found)
       break;
     offset = segment.next_offset;
-    if (offset >= s.size() || n->children.empty()) {
+    if (n->fn.prefix_match) {
+      prefix_fn = &n->fn;
+      prefix_args = args;
+    }
+    if (offset >= s.size()) {
       fn(n->fn, args);
       return true;
     }
+  }
+  if (prefix_fn != nullptr) {
+    fn(*prefix_fn, prefix_args);
+    return true;
   }
   return false;
 }
@@ -1742,6 +1753,7 @@ inline void serve_file(response_writer& resp, request& req, const std::string& p
 
 inline void server_t::static_dir(const std::string& path, const std::string& dir, bool listing) {
   register_route(route_method::get, path, [&](func_t& func) {
+    func.prefix_match = true;
     func.f_writer = [path, dir, listing](response_writer& resp, request& req) {
       auto resolved = resolve_static_path(req.uri, path, dir);
       if (resolved.forbidden) {
