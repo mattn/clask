@@ -752,9 +752,12 @@ void POST(const std::string&, const functor_ ## name);
   CLASK_DEFINE_REQUEST(response)
 #undef CLASK_DEFINE_REQUEST
   void static_dir(const std::string&, const std::string&, bool listing = false);
-  server_t& worker_count(unsigned int);
-  server_t& accept_queue_limit(size_t);
-  server_t& socket_timeout(int);
+  server_t& worker_count(unsigned int) &;
+  server_t&& worker_count(unsigned int) &&;
+  server_t& accept_queue_limit(size_t) &;
+  server_t&& accept_queue_limit(size_t) &&;
+  server_t& socket_timeout(int) &;
+  server_t&& socket_timeout(int) &&;
   void run(const std::string&);
   void run(int);
   logger log;
@@ -764,19 +767,34 @@ void POST(const std::string&, const functor_ ## name);
 #endif
 };
 
-inline server_t& server_t::worker_count(unsigned int v) {
+inline server_t& server_t::worker_count(unsigned int v) & {
   worker_count_ = v;
   return *this;
 }
 
-inline server_t& server_t::accept_queue_limit(size_t v) {
+inline server_t&& server_t::worker_count(unsigned int v) && {
+  worker_count_ = v;
+  return std::move(*this);
+}
+
+inline server_t& server_t::accept_queue_limit(size_t v) & {
   accept_queue_limit_ = v;
   return *this;
 }
 
-inline server_t& server_t::socket_timeout(int v) {
+inline server_t&& server_t::accept_queue_limit(size_t v) && {
+  accept_queue_limit_ = v;
+  return std::move(*this);
+}
+
+inline server_t& server_t::socket_timeout(int v) & {
   socket_timeout_ms_ = v;
   return *this;
+}
+
+inline server_t&& server_t::socket_timeout(int v) && {
+  socket_timeout_ms_ = v;
+  return std::move(*this);
 }
 
 inline void server_t::parse_tree(node& n, const std::string& s, const func_t& fn) {

@@ -12,10 +12,10 @@ Very Very Experimental Web micro-framework like flask in C++.
 #include "clask/core.hpp"
 
 int main() {
-  auto s = clask::server();
-  s.worker_count(32);
-  s.accept_queue_limit(4096);
-  s.socket_timeout(3000);
+  auto s = clask::server()
+    .worker_count(32)
+    .accept_queue_limit(4096)
+    .socket_timeout(3000);
   s.GET("/", [](clask::request& req) {
     return "OK!";
   });
@@ -32,10 +32,10 @@ int main() {
 `server_t` exposes a few knobs for the worker-pool based runtime:
 
 ```cpp
-auto s = clask::server();
-s.worker_count(32);
-s.accept_queue_limit(4096);
-s.socket_timeout(3000);
+auto s = clask::server()
+  .worker_count(32)
+  .accept_queue_limit(4096)
+  .socket_timeout(3000);
 ```
 
 - `worker_count(n)` sets the number of worker threads.
