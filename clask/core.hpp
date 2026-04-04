@@ -509,7 +509,6 @@ inline void send_text_response(
   send(s, os.str().data(), (int) os.str().size(), MSG_NOSIGNAL);
 }
 
-
 typedef enum class _log_level {ERR, WARN, INFO, DEBUG} log_level;
 
 class logger {
@@ -843,6 +842,13 @@ static std::unordered_map<int, std::string> status_codes = {
   { 510, "Not Extended" },
   { 511, "Network Authentication Required" },
 };
+
+inline void send_status_text_response(
+    int s,
+    int code,
+    bool keep_alive) {
+  send_text_response(s, code, status_codes[code], status_codes[code], keep_alive);
+}
 
 static std::unordered_map<std::string, std::string> content_types = {
   { ".txt",  "text/plain; charset=utf-8" },
@@ -1366,13 +1372,13 @@ inline bool dispatch_request(
       CLASK_LOG(clask::log_level::WARN) << remote << " " << code << " " << req.method << " " << req.uri;
 #endif
       keep_alive = false;
-      send_text_response(s, code, "Internal Server Error", "Internal Server Error", keep_alive);
+      send_status_text_response(s, 500, keep_alive);
     }
   })) {
 #ifndef CLASK_DISABLE_LOGS
     CLASK_LOG(clask::log_level::WARN) << remote << " " << 404 << " " << req.method << " " << req.uri;
 #endif
-    send_text_response(s, 404, "Not Found", "Not Found", keep_alive);
+    send_status_text_response(s, 404, keep_alive);
   }
   return keep_alive;
 }
