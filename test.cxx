@@ -371,6 +371,16 @@ void test_clask_static_path_resolution() {
     _ok(result.forbidden == false, R"(result.forbidden == false)");
     _ok(result.path == "./public/", R"(result.path == "./public/")");
   }
+  {
+    auto result = clask::resolve_static_path("/staticx/file.txt", "/static/", "./public");
+    _ok(result.matched == false, R"(result.matched == false)");
+    _ok(result.forbidden == false, R"(result.forbidden == false)");
+  }
+  {
+    auto result = clask::resolve_static_path("/static/%2e%2e/secret.txt", "/static/", "./public");
+    _ok(result.matched == true, R"(result.matched == true)");
+    _ok(result.forbidden == true, R"(result.forbidden == true)");
+  }
 }
 
 int main() {
