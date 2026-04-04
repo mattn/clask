@@ -925,6 +925,12 @@ inline void write_plain_text_response(
   resp.write(body);
 }
 
+inline void write_status_text_response(
+    response_writer& resp,
+    int code) {
+  write_plain_text_response(resp, code, status_codes[code]);
+}
+
 inline std::unordered_map<std::string, std::string> params(const std::string& s) {
   std::unordered_map<std::string, std::string> ret;
   std::istringstream iss(s);
@@ -1694,7 +1700,7 @@ inline void serve_file(response_writer& resp, request& req, const std::string& p
 
   std::ifstream is(fspath, std::ios::in | std::ios::binary);
   if (is.fail()) {
-    write_plain_text_response(resp, 404, "Not Found");
+    write_status_text_response(resp, 404);
     return;
   }
 
@@ -1715,7 +1721,7 @@ inline void serve_file(response_writer& resp, request& req, const std::string& p
       std::istringstream ss(h.second);
       ss >> std::get_time(&file_gmt, "%a, %d %B %Y %H:%M:%S");
       if (!ss.fail() && std::mktime(&file_gmt) <= std::mktime(gmt)) {
-        write_plain_text_response(resp, 304, "Not Modified");
+        write_status_text_response(resp, 304);
         return;
       }
       break;
@@ -1737,11 +1743,11 @@ inline void server_t::static_dir(const std::string& path, const std::string& dir
     func.f_writer = [path, dir, listing](response_writer& resp, request& req) {
       auto resolved = resolve_static_path(req.uri, path, dir);
       if (resolved.forbidden) {
-        write_plain_text_response(resp, 403, "Forbidden");
+        write_status_text_response(resp, 403);
         return;
       }
       if (!resolved.matched) {
-        write_plain_text_response(resp, 404, "Not Found");
+        write_status_text_response(resp, 404);
         return;
       }
 
