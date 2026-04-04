@@ -82,6 +82,11 @@ struct connection_state {
   std::string remote;
 };
 
+struct completed_connection {
+  connection_state conn;
+  bool keep_alive;
+};
+
 inline bool set_socket_timeout(int s, int optname, int timeout_ms) {
 #ifdef _WIN32
   DWORD timeout = (DWORD) timeout_ms;
@@ -257,6 +262,57 @@ inline size_t resolve_accept_queue_limit(
     return configured_accept_queue_limit;
   }
   return worker_count * accept_queue_factor;
+}
+
+template <typename HandleConnectionFn>
+inline void start_worker_pool(
+    unsigned int worker_count,
+    std::mutex& ready_queue_mu,
+    std::condition_variable& ready_queue_cv,
+    std::deque<connection_state>& ready_queue,
+    std::mutex& completed_queue_mu,
+    std::deque<completed_connection>& completed_queue,
+    HandleConnectionFn&& handle_connection) {
+  for (unsigned int n = 0; n < worker_count; n++) {
+    std::thread([&]() {
+      while (true) {
+        connection_state conn;
+        {
+          std::unique_lock<std::mutex> lk(ready_queue_mu);
+          ready_queue_cv.wait(lk, [&]() { return !ready_queue.empty(); });
+          conn = std::move(ready_queue.front());
+          ready_queue.pop_front();
+        }
+        auto keep_alive = handle_connection(conn.fd, conn.remote);
+        {
+          std::lock_guard<std::mutex> lk(completed_queue_mu);
+          completed_queue.push_back(completed_connection{
+            .conn = std::move(conn),
+            .keep_alive = keep_alive,
+          });
+        }
+      }
+    }).detach();
+  }
+}
+
+inline void drain_completed_connections(
+    std::mutex& completed_queue_mu,
+    std::deque<completed_connection>& completed_queue,
+    std::unordered_map<int, connection_state>& idle_connections,
+    std::atomic<size_t>& tracked_connections) {
+  std::deque<completed_connection> drained;
+  {
+    std::lock_guard<std::mutex> lk(completed_queue_mu);
+    drained.swap(completed_queue);
+  }
+  for (auto& conn : drained) {
+    if (conn.keep_alive) {
+      idle_connections.emplace(conn.conn.fd, std::move(conn.conn));
+    } else {
+      tracked_connections--;
+    }
+  }
 }
 
 inline void send_text_response(
@@ -1456,11 +1512,6 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
     return keep_alive;
   };
 
-  struct completed_connection {
-    connection_state conn;
-    bool keep_alive;
-  };
-
   std::mutex ready_queue_mu;
   std::condition_variable ready_queue_cv;
   std::deque<connection_state> ready_queue;
@@ -1471,45 +1522,21 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
   const auto worker_count = resolve_worker_count(worker_count_);
   const auto accept_queue_limit = resolve_accept_queue_limit(accept_queue_limit_, worker_count);
 
-  for (unsigned int n = 0; n < worker_count; n++) {
-    std::thread([&]() {
-      while (true) {
-        connection_state conn;
-        {
-          std::unique_lock<std::mutex> lk(ready_queue_mu);
-          ready_queue_cv.wait(lk, [&]() { return !ready_queue.empty(); });
-          conn = std::move(ready_queue.front());
-          ready_queue.pop_front();
-        }
-        auto keep_alive = handle_connection(conn.fd, conn.remote);
-        {
-          std::lock_guard<std::mutex> lk(completed_queue_mu);
-          completed_queue.push_back(completed_connection{
-            .conn = std::move(conn),
-            .keep_alive = keep_alive,
-          });
-        }
-      }
-    }).detach();
-  }
-
-  auto drain_completed = [&]() {
-    std::deque<completed_connection> drained;
-    {
-      std::lock_guard<std::mutex> lk(completed_queue_mu);
-      drained.swap(completed_queue);
-    }
-    for (auto& conn : drained) {
-      if (conn.keep_alive) {
-        idle_connections.emplace(conn.conn.fd, std::move(conn.conn));
-      } else {
-        tracked_connections--;
-      }
-    }
-  };
+  start_worker_pool(
+      worker_count,
+      ready_queue_mu,
+      ready_queue_cv,
+      ready_queue,
+      completed_queue_mu,
+      completed_queue,
+      handle_connection);
 
   while (true) {
-    drain_completed();
+    drain_completed_connections(
+        completed_queue_mu,
+        completed_queue,
+        idle_connections,
+        tracked_connections);
     auto wait_result = wait_socket_events(server_fd, idle_connections, 100);
     if (!wait_result.server_readable && wait_result.events.empty()) {
       continue;
