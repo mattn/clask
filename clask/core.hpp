@@ -1307,6 +1307,7 @@ private:
   int socket_timeout_ms_;
   void parse_tree(node&, const std::string&, const func_t&);
   bool match(const std::string&, const std::string&, const std::function<void(const func_t& fn, const std::vector<std::string>&)>&) const;
+  bool handle_connection_socket(int, const std::string&) const;
   void _run(const std::string&, int);
 
 public:
@@ -1444,6 +1445,16 @@ inline bool server_t::match(const std::string& method, const std::string& s, con
     }
   }
   return false;
+}
+
+inline bool server_t::handle_connection_socket(int s, const std::string& remote) const {
+  return handle_connection_request(
+      s,
+      remote,
+      socket_timeout_ms_,
+      [&](const std::string& method, const std::string& path, const auto& fn) {
+        return match(method, path, fn);
+      });
 }
 
 #ifdef CLASK_TEST
@@ -1614,16 +1625,6 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
 
   auto server_fd = create_listening_socket(host, port);
 
-  auto handle_connection = [&](int s, const std::string& remote) {
-    return handle_connection_request(
-        s,
-        remote,
-        socket_timeout_ms_,
-        [&](const std::string& method, const std::string& path, const auto& fn) {
-          return match(method, path, fn);
-        });
-  };
-
   server_runtime_state runtime;
   const auto worker_count = resolve_worker_count(worker_count_);
   const auto accept_queue_limit = resolve_accept_queue_limit(accept_queue_limit_, worker_count);
@@ -1633,7 +1634,9 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
       worker_count,
       accept_queue_limit,
       runtime,
-      handle_connection);
+      [&](int s, const std::string& remote) {
+        return handle_connection_socket(s, remote);
+      });
 }
 
 inline void server_t::run(const std::string& addr) {
