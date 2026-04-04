@@ -97,6 +97,15 @@ struct server_runtime_state {
   std::atomic<size_t> tracked_connections{0};
 };
 
+inline void drain_completed_connections(server_runtime_state& runtime);
+inline void accept_ready_connection(
+    int server_fd,
+    size_t accept_queue_limit,
+    server_runtime_state& runtime);
+inline void requeue_readable_idle_connections(
+    const std::vector<socket_wait_event>& events,
+    server_runtime_state& runtime);
+
 inline bool set_socket_timeout(int s, int optname, int timeout_ms) {
 #ifdef _WIN32
   DWORD timeout = (DWORD) timeout_ms;
@@ -299,6 +308,33 @@ inline void start_worker_pool(
         }
       }
     }).detach();
+  }
+}
+
+template <typename HandleConnectionFn>
+inline void run_server_event_loop(
+    int server_fd,
+    unsigned int worker_count,
+    size_t accept_queue_limit,
+    server_runtime_state& runtime,
+    HandleConnectionFn&& handle_connection) {
+  start_worker_pool(
+      worker_count,
+      runtime,
+      std::forward<HandleConnectionFn>(handle_connection));
+
+  while (true) {
+    drain_completed_connections(runtime);
+    auto wait_result = wait_socket_events(server_fd, runtime.idle_connections, 100);
+    if (!wait_result.server_readable && wait_result.events.empty()) {
+      continue;
+    }
+
+    if (wait_result.server_readable) {
+      accept_ready_connection(server_fd, accept_queue_limit, runtime);
+    }
+
+    requeue_readable_idle_connections(wait_result.events, runtime);
   }
 }
 
@@ -1585,24 +1621,12 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
   const auto worker_count = resolve_worker_count(worker_count_);
   const auto accept_queue_limit = resolve_accept_queue_limit(accept_queue_limit_, worker_count);
 
-  start_worker_pool(
+  run_server_event_loop(
+      server_fd,
       worker_count,
+      accept_queue_limit,
       runtime,
       handle_connection);
-
-  while (true) {
-    drain_completed_connections(runtime);
-    auto wait_result = wait_socket_events(server_fd, runtime.idle_connections, 100);
-    if (!wait_result.server_readable && wait_result.events.empty()) {
-      continue;
-    }
-
-    if (wait_result.server_readable) {
-      accept_ready_connection(server_fd, accept_queue_limit, runtime);
-    }
-
-    requeue_readable_idle_connections(wait_result.events, runtime);
-  }
 }
 
 inline void server_t::run(const std::string& addr) {
