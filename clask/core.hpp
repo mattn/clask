@@ -1372,6 +1372,7 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
 #endif
       if (read_result.error_code != 0) {
         send_text_response(
+            s,
             read_result.error_code,
             read_result.error_reason,
             read_result.error_body,
@@ -1396,13 +1397,13 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
         CLASK_LOG(clask::log_level::WARN) << remote << " " << code << " " << req.method << " " << req.uri;
 #endif
         keep_alive = false;
-        send_text_response(code, "Internal Server Error", "Internal Server Error", keep_alive);
+        send_text_response(s, code, "Internal Server Error", "Internal Server Error", keep_alive);
       }
     })) {
 #ifndef CLASK_DISABLE_LOGS
       CLASK_LOG(clask::log_level::WARN) << remote << " " << 404 << " " << req.method << " " << req.uri;
 #endif
-      send_text_response(404, "Not Found", "Not Found", keep_alive);
+      send_text_response(s, 404, "Not Found", "Not Found", keep_alive);
     }
     if (!keep_alive) {
       closesocket(s);
