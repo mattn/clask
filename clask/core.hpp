@@ -237,6 +237,28 @@ inline int create_listening_socket(const std::string& host, int port) {
   return server_fd;
 }
 
+inline unsigned int resolve_worker_count(unsigned int configured_worker_count) {
+  auto worker_count = configured_worker_count;
+  if (worker_count == 0) {
+    worker_count = std::thread::hardware_concurrency();
+    if (worker_count == 0) {
+      worker_count = default_worker_count;
+    } else {
+      worker_count *= 2;
+    }
+  }
+  return worker_count;
+}
+
+inline size_t resolve_accept_queue_limit(
+    size_t configured_accept_queue_limit,
+    unsigned int worker_count) {
+  if (configured_accept_queue_limit > 0) {
+    return configured_accept_queue_limit;
+  }
+  return worker_count * accept_queue_factor;
+}
+
 inline void send_text_response(
     int s,
     int code,
@@ -1446,17 +1468,8 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
   std::deque<completed_connection> completed_queue;
   std::unordered_map<int, connection_state> idle_connections;
   std::atomic<size_t> tracked_connections{0};
-  unsigned int worker_count = worker_count_;
-  if (worker_count == 0) {
-    worker_count = std::thread::hardware_concurrency();
-    if (worker_count == 0) {
-      worker_count = default_worker_count;
-    } else {
-      worker_count *= 2;
-    }
-  }
-  const size_t accept_queue_limit =
-      accept_queue_limit_ > 0 ? accept_queue_limit_ : worker_count * accept_queue_factor;
+  const auto worker_count = resolve_worker_count(worker_count_);
+  const auto accept_queue_limit = resolve_accept_queue_limit(accept_queue_limit_, worker_count);
 
   for (unsigned int n = 0; n < worker_count; n++) {
     std::thread([&]() {
