@@ -273,6 +273,13 @@ void test_clask_parse_path_segment() {
     _ok(segment.placeholder == false, R"(segment.placeholder == false)");
     _ok(segment.has_more == false, R"(segment.has_more == false)");
   }
+  {
+    auto segment = clask::parse_path_segment("/users//name", 6);
+    _ok(segment.value == "", R"(segment.value == "")");
+    _ok(segment.next_offset == 7, R"(segment.next_offset == 7)");
+    _ok(segment.placeholder == false, R"(segment.placeholder == false)");
+    _ok(segment.has_more == true, R"(segment.has_more == true)");
+  }
 }
 
 void test_clask_server_runtime_helpers() {
@@ -343,6 +350,12 @@ void test_clask_static_path_resolution() {
     _ok(result.matched == true, R"(result.matched == true)");
     _ok(result.forbidden == false, R"(result.forbidden == false)");
     _ok(result.path == "./public/hello world.txt", R"(result.path == "./public/hello world.txt")");
+  }
+  {
+    auto result = clask::resolve_static_path("/static/", "/static/", "./public");
+    _ok(result.matched == true, R"(result.matched == true)");
+    _ok(result.forbidden == false, R"(result.forbidden == false)");
+    _ok(result.path == "./public/", R"(result.path == "./public/")");
   }
 }
 
