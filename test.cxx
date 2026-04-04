@@ -179,6 +179,22 @@ void test_clask_post_route_match() {
   _ok(invalid == false, R"(invalid == false)");
 }
 
+void test_clask_root_route_match() {
+  auto s = clask::server();
+  s.GET("/", [](clask::request& /*req*/) -> std::string {
+    return "root";
+  });
+
+  auto result = s.test_match("GET", "/", [&](const clask::func_t& /*fn*/, const std::vector<std::string>& args) {
+    _ok(args.empty() == true, R"(args.empty() == true)");
+  });
+  _ok(result == true, R"(result == true)");
+
+  auto miss = s.test_match("GET", "/root", [&](const clask::func_t& /*fn*/, const std::vector<std::string>& /*args*/) {
+  });
+  _ok(miss == false, R"(miss == false)");
+}
+
 void test_clask_parse_listen_address() {
   {
     auto addr = clask::parse_listen_address("127.0.0.1:8080");
@@ -243,6 +259,13 @@ void test_clask_parse_path_segment() {
     _ok(segment.value == "id", R"(segment.value == "id")");
     _ok(segment.next_offset == 10, R"(segment.next_offset == 10)");
     _ok(segment.placeholder == true, R"(segment.placeholder == true)");
+    _ok(segment.has_more == false, R"(segment.has_more == false)");
+  }
+  {
+    auto segment = clask::parse_path_segment("/", 0);
+    _ok(segment.value == "", R"(segment.value == "")");
+    _ok(segment.next_offset == 1, R"(segment.next_offset == 1)");
+    _ok(segment.placeholder == false, R"(segment.placeholder == false)");
     _ok(segment.has_more == false, R"(segment.has_more == false)");
   }
 }
@@ -321,6 +344,7 @@ int main() {
   subtest("test_clask_to_wstring", test_clask_to_wstring);
   subtest("test_clask_request_uri_param", test_clask_request_uri_param);
   subtest("test_clask_post_route_match", test_clask_post_route_match);
+  subtest("test_clask_root_route_match", test_clask_root_route_match);
   subtest("test_clask_parse_listen_address", test_clask_parse_listen_address);
   subtest("test_clask_parse_route_method", test_clask_parse_route_method);
   subtest("test_clask_parse_path_segment", test_clask_parse_path_segment);
