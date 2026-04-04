@@ -206,6 +206,23 @@ void test_clask_parse_listen_address() {
   }
 }
 
+void test_clask_parse_route_method() {
+  {
+    auto method = clask::parse_route_method("GET");
+    _ok(method.has_value() == true, R"(method.has_value() == true)");
+    _ok(*method == clask::route_method::get, R"(*method == clask::route_method::get)");
+  }
+  {
+    auto method = clask::parse_route_method("POST");
+    _ok(method.has_value() == true, R"(method.has_value() == true)");
+    _ok(*method == clask::route_method::post, R"(*method == clask::route_method::post)");
+  }
+  {
+    auto method = clask::parse_route_method("DELETE");
+    _ok(method.has_value() == false, R"(method.has_value() == false)");
+  }
+}
+
 void test_clask_server_runtime_helpers() {
   _ok(clask::resolve_worker_count(7) == 7, R"(clask::resolve_worker_count(7) == 7)");
   _ok(clask::resolve_accept_queue_limit(123, 7) == 123, R"(clask::resolve_accept_queue_limit(123, 7) == 123)");
@@ -281,6 +298,7 @@ int main() {
   subtest("test_clask_request_uri_param", test_clask_request_uri_param);
   subtest("test_clask_post_route_match", test_clask_post_route_match);
   subtest("test_clask_parse_listen_address", test_clask_parse_listen_address);
+  subtest("test_clask_parse_route_method", test_clask_parse_route_method);
   subtest("test_clask_server_runtime_helpers", test_clask_server_runtime_helpers);
   subtest("test_clask_fluent_server_setup", test_clask_fluent_server_setup);
   subtest("test_clask_static_path_resolution", test_clask_static_path_resolution);
