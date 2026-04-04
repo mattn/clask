@@ -215,6 +215,37 @@ inline void send_text_response(
   send(s, os.str().data(), (int) os.str().size(), MSG_NOSIGNAL);
 }
 
+template <typename MatchFn>
+inline bool dispatch_request(
+    MatchFn&& match_fn,
+    int s,
+    const std::string& remote,
+    request& req,
+    bool& keep_alive) {
+  if (!match_fn(req.method, req.uri, [&](const func_t& fn, const std::vector<std::string>& args) {
+    req.args = args;
+    int code = 500;
+    try {
+      code = fn.handle(s, req, keep_alive);
+#ifndef CLASK_DISABLE_LOGS
+      CLASK_LOG(clask::log_level::INFO) << remote << " " << code << " " << req.method << " " << req.uri;
+#endif
+    } catch (std::exception&) {
+#ifndef CLASK_DISABLE_LOGS
+      CLASK_LOG(clask::log_level::WARN) << remote << " " << code << " " << req.method << " " << req.uri;
+#endif
+      keep_alive = false;
+      send_text_response(s, code, "Internal Server Error", "Internal Server Error", keep_alive);
+    }
+  })) {
+#ifndef CLASK_DISABLE_LOGS
+    CLASK_LOG(clask::log_level::WARN) << remote << " " << 404 << " " << req.method << " " << req.uri;
+#endif
+    send_text_response(s, 404, "Not Found", "Not Found", keep_alive);
+  }
+  return keep_alive;
+}
+
 
 typedef enum class _log_level {ERR, WARN, INFO, DEBUG} log_level;
 
@@ -1384,27 +1415,14 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
 
     auto req = std::move(*read_result.req);
     auto keep_alive = read_result.keep_alive;
-    if (!match(req.method, req.uri, [&](const func_t& fn, const std::vector<std::string>& args) {
-      req.args = args;
-      int code = 500;
-      try {
-        code = fn.handle(s, req, keep_alive);
-#ifndef CLASK_DISABLE_LOGS
-        CLASK_LOG(clask::log_level::INFO) << remote << " " << code << " " << req.method << " " << req.uri;
-#endif
-      } catch (std::exception&) {
-#ifndef CLASK_DISABLE_LOGS
-        CLASK_LOG(clask::log_level::WARN) << remote << " " << code << " " << req.method << " " << req.uri;
-#endif
-        keep_alive = false;
-        send_text_response(s, code, "Internal Server Error", "Internal Server Error", keep_alive);
-      }
-    })) {
-#ifndef CLASK_DISABLE_LOGS
-      CLASK_LOG(clask::log_level::WARN) << remote << " " << 404 << " " << req.method << " " << req.uri;
-#endif
-      send_text_response(s, 404, "Not Found", "Not Found", keep_alive);
-    }
+    dispatch_request(
+        [&](const std::string& method, const std::string& path, const auto& fn) {
+          return match(method, path, fn);
+        },
+        s,
+        remote,
+        req,
+        keep_alive);
     if (!keep_alive) {
       closesocket(s);
     }
