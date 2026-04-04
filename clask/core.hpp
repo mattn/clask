@@ -19,6 +19,7 @@
 #include <mutex>
 #include <deque>
 #include <condition_variable>
+#include <atomic>
 #include <filesystem>
 #include <chrono>
 
@@ -42,6 +43,7 @@ typedef char sockopt_t;
 # include <sys/fcntl.h>
 # include <sys/types.h>
 # include <sys/socket.h>
+# include <poll.h>
 # include <netinet/in.h>
 # include <arpa/inet.h>
 # include <netdb.h>
@@ -1081,10 +1083,9 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
     if (!set_socket_timeout(s, SO_RCVTIMEO, socket_timeout_ms_)
         || !set_socket_timeout(s, SO_SNDTIMEO, socket_timeout_ms_)) {
       closesocket(s);
-      return;
+      return false;
     }
 
-    bool keep_connection_alive = true;
     auto send_text_response = [&](int code, const std::string& reason, const std::string& body, bool keep_alive) {
       std::ostringstream os;
       os << "HTTP/1.1 " << code << " " << reason
@@ -1094,133 +1095,148 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
          << "\r\n\r\n" << body;
       send(s, os.str().data(), (int) os.str().size(), MSG_NOSIGNAL);
     };
-    while (keep_connection_alive) {
-      keep_connection_alive = false;
-      char buf[16384];
-      const char *method, *path;
-      int pret, minor_version;
-      struct phr_header headers[100];
-      size_t buflen = 0, prevbuflen = 0, method_len, path_len, num_headers;
-      ssize_t rret;
+    char buf[16384];
+    const char *method, *path;
+    int pret, minor_version;
+    struct phr_header headers[100];
+    size_t buflen = 0, prevbuflen = 0, method_len, path_len, num_headers;
+    ssize_t rret;
 
-      while (true) {
+    while (true) {
+      while ((rret = recv(s, buf + buflen, (int) (sizeof(buf) - buflen), MSG_NOSIGNAL)) == -1 && errno == EINTR);
+      if (rret <= 0) {
+        closesocket(s);
+        return false;
+      }
+
+      prevbuflen = buflen;
+      buflen += rret;
+      num_headers = sizeof(headers) / sizeof(headers[0]);
+      pret = phr_parse_request(
+          buf, buflen, &method, &method_len, &path, &path_len,
+          &minor_version, headers, &num_headers, prevbuflen);
+      if (pret > 0) {
+        break;
+      }
+      if (pret == -1) {
+ #ifndef CLASK_DISABLE_LOGS
+        CLASK_LOG(clask::log_level::ERR) << "invalid request";
+ #endif
+        closesocket(s);
+        return false;
+      }
+      if (buflen == sizeof(buf)) {
+ #ifndef CLASK_DISABLE_LOGS
+        CLASK_LOG(clask::log_level::ERR) << "request is too long";
+ #endif
+        send_text_response(413, "Payload Too Large", "Request Too Large", false);
+        closesocket(s);
+        return false;
+      }
+    }
+
+    const std::string req_method(method, method_len);
+    std::string req_path(path, path_len);
+    std::string req_body(buf + pret, buflen - pret);
+    const std::string req_raw_path = req_path;
+    std::unordered_map<std::string, std::string> req_uri_params;
+    std::vector<header> req_headers;
+
+    auto pos = req_path.find('?');
+    if (pos != std::string::npos) {
+      req_path.resize(pos);
+      std::istringstream iss(req_raw_path.substr(pos + 1));
+      std::string keyval, key, val;
+      while (std::getline(iss, keyval, '&')) {
+        std::istringstream isk(keyval);
+        if(std::getline(std::getline(isk, key, '='), val)) {
+          req_uri_params[url_decode(key)] = url_decode(val);
+        }
+      }
+    }
+
+    bool keep_alive = minor_version == 1;
+    bool has_content_length = false;
+    size_t content_length = 0;
+    for (size_t n = 0; n < num_headers; n++) {
+      auto key = std::string(headers[n].name, headers[n].name_len);
+      auto val = std::string(headers[n].value, headers[n].value_len);
+      camelize(key);
+      if (key == "Content-Length") {
+        content_length = std::stoi(val);
+        has_content_length = true;
+      } else if (key == "Connection") {
+        for (auto& c : val) c = (char) std::tolower(c);
+        if (val == "keep-alive")
+          keep_alive = true;
+        else if (val == "close")
+          keep_alive = false;
+      }
+      req_headers.emplace_back(std::move(key), std::move(val));
+    }
+
+    if (has_content_length && buflen - pret < content_length) {
+      auto rest = content_length - (buflen - pret);
+      buflen = 0;
+      while (rest > 0) {
         while ((rret = recv(s, buf + buflen, (int) (sizeof(buf) - buflen), MSG_NOSIGNAL)) == -1 && errno == EINTR);
         if (rret <= 0) {
-          // IOError
           closesocket(s);
-          return;
+          return false;
         }
-
-        prevbuflen = buflen;
-        buflen += rret;
-        num_headers = sizeof(headers) / sizeof(headers[0]);
-        pret = phr_parse_request(
-            buf, buflen, &method, &method_len, &path, &path_len,
-            &minor_version, headers, &num_headers, prevbuflen);
-        if (pret > 0) {
-          break;
-        }
-        if (pret == -1) {
-          // ParseError
-#ifndef CLASK_DISABLE_LOGS
-          CLASK_LOG(clask::log_level::ERR) << "invalid request";
-#endif
-          return;
-        }
-        if (buflen == sizeof(buf)) {
-          // RequestIsTooLongError
-#ifndef CLASK_DISABLE_LOGS
-          CLASK_LOG(clask::log_level::ERR) << "request is too long";
-#endif
-          continue;
-        }
+        req_body.append(buf, rret);
+        rest -= rret;
       }
-
-      const std::string req_method(method, method_len);
-      std::string req_path(path, path_len);
-      std::string req_body(buf + pret, buflen - pret);
-      const std::string req_raw_path = req_path;
-      std::unordered_map<std::string, std::string> req_uri_params;
-      std::vector<header> req_headers;
-
-      auto pos = req_path.find('?');
-      if (pos != std::string::npos) {
-        req_path.resize(pos);
-        std::istringstream iss(req_raw_path.substr(pos + 1));
-        std::string keyval, key, val;
-        while (std::getline(iss, keyval, '&')) {
-          std::istringstream isk(keyval);
-          if(std::getline(std::getline(isk, key, '='), val)) {
-            req_uri_params[url_decode(key)] = url_decode(val);
-          }
-        }
-      }
-
-      bool keep_alive = false;
-      bool has_content_length = false;
-      size_t content_length = 0;
-      for (size_t n = 0; n < num_headers; n++) {
-        auto key = std::string(headers[n].name, headers[n].name_len);
-        auto val = std::string(headers[n].value, headers[n].value_len);
-        camelize(key);
-        if (key == "Content-Length") {
-          content_length = std::stoi(val);
-          has_content_length = true;
-        }
-        req_headers.emplace_back(std::move(key), std::move(val));
-      }
-      if (has_content_length && buflen - pret < content_length) {
-        auto rest = content_length - (buflen - pret);
-        buflen = 0;
-        while (rest > 0) {
-          while ((rret = recv(s, buf + buflen, (int) (sizeof(buf) - buflen), MSG_NOSIGNAL)) == -1 && errno == EINTR);
-          if (rret <= 0) {
-            // IOError
-            closesocket(s);
-            return;
-          }
-          req_body.append(buf, rret);
-          rest -= rret;
-        }
-      }
-
-      request req(
-          req_method,
-          req_raw_path,
-          req_path,
-          std::move(req_uri_params),
-          std::move(req_headers),
-          std::move(req_body));
-
-      if (!match(req_method, req_path, [&](const func_t& fn, const std::vector<std::string>& args) {
-        req.args = args;
-        int code = 500;
-        try {
-          code = fn.handle(s, req, keep_alive);
-#ifndef CLASK_DISABLE_LOGS
-          CLASK_LOG(clask::log_level::INFO) << remote << " " << code << " " << req_method << " " << req_path;
-#endif
-        } catch (std::exception&) {
-#ifndef CLASK_DISABLE_LOGS
-          CLASK_LOG(clask::log_level::WARN) << remote << " " << code << " " << req_method << " " << req_path;
-#endif
-          keep_alive = false;
-          send_text_response(code, "Internal Server Error", "Internal Server Error", keep_alive);
-        }
-      })) {
-#ifndef CLASK_DISABLE_LOGS
-        CLASK_LOG(clask::log_level::WARN) << remote << " " << 404 << " " << req_method << " " << req_path;
-#endif
-        send_text_response(404, "Not Found", "Not Found", keep_alive);
-      }
-      keep_connection_alive = keep_alive;
     }
-    closesocket(s);
+
+    request req(
+        req_method,
+        req_raw_path,
+        req_path,
+        std::move(req_uri_params),
+        std::move(req_headers),
+        std::move(req_body));
+
+    if (!match(req_method, req_path, [&](const func_t& fn, const std::vector<std::string>& args) {
+      req.args = args;
+      int code = 500;
+      try {
+        code = fn.handle(s, req, keep_alive);
+#ifndef CLASK_DISABLE_LOGS
+        CLASK_LOG(clask::log_level::INFO) << remote << " " << code << " " << req_method << " " << req_path;
+#endif
+      } catch (std::exception&) {
+#ifndef CLASK_DISABLE_LOGS
+        CLASK_LOG(clask::log_level::WARN) << remote << " " << code << " " << req_method << " " << req_path;
+#endif
+        keep_alive = false;
+        send_text_response(code, "Internal Server Error", "Internal Server Error", keep_alive);
+      }
+    })) {
+#ifndef CLASK_DISABLE_LOGS
+      CLASK_LOG(clask::log_level::WARN) << remote << " " << 404 << " " << req_method << " " << req_path;
+#endif
+      send_text_response(404, "Not Found", "Not Found", keep_alive);
+    }
+    if (!keep_alive) {
+      closesocket(s);
+    }
+    return keep_alive;
   };
 
-  std::mutex accept_queue_mu;
-  std::condition_variable accept_queue_cv;
-  std::deque<std::pair<int, std::string>> accept_queue;
+  struct completed_connection {
+    int s;
+    std::string remote;
+    bool keep_alive;
+  };
+
+  std::mutex ready_queue_mu;
+  std::condition_variable ready_queue_cv;
+  std::deque<std::pair<int, std::string>> ready_queue;
+  std::mutex completed_queue_mu;
+  std::deque<completed_connection> completed_queue;
+  std::unordered_map<int, std::string> idle_connections;
+  std::atomic<size_t> tracked_connections{0};
   unsigned int worker_count = worker_count_;
   if (worker_count == 0) {
     worker_count = std::thread::hardware_concurrency();
@@ -1238,41 +1254,155 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
       while (true) {
         std::pair<int, std::string> conn;
         {
-          std::unique_lock<std::mutex> lk(accept_queue_mu);
-          accept_queue_cv.wait(lk, [&]() { return !accept_queue.empty(); });
-          conn = std::move(accept_queue.front());
-          accept_queue.pop_front();
+          std::unique_lock<std::mutex> lk(ready_queue_mu);
+          ready_queue_cv.wait(lk, [&]() { return !ready_queue.empty(); });
+          conn = std::move(ready_queue.front());
+          ready_queue.pop_front();
         }
-        handle_connection(conn.first, conn.second);
+        auto keep_alive = handle_connection(conn.first, conn.second);
+        {
+          std::lock_guard<std::mutex> lk(completed_queue_mu);
+          completed_queue.push_back(completed_connection{
+            conn.first,
+            std::move(conn.second),
+            keep_alive,
+          });
+        }
       }
     }).detach();
   }
 
-  while (true) {
-    struct sockaddr_in client_address{};
-    socklen_t client_addrlen = sizeof(client_address);
-    auto s = (int) accept(server_fd, (struct sockaddr *)&client_address, &client_addrlen);
-    if (s < 0) {
-      throw std::runtime_error("accept");
-    }
-    char addr_buf[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &client_address.sin_addr, addr_buf, INET_ADDRSTRLEN);
+  auto drain_completed = [&]() {
+    std::deque<completed_connection> drained;
     {
-      std::lock_guard<std::mutex> lk(accept_queue_mu);
-      if (accept_queue.size() >= accept_queue_limit) {
-        static const std::string busy_response =
-            "HTTP/1.1 503 Service Unavailable\r\n"
-            "Content-Type: text/plain\r\n"
-            "Connection: Close\r\n"
-            "Content-Length: 19\r\n\r\n"
-            "Service Unavailable";
-        send(s, busy_response.data(), (int) busy_response.size(), MSG_NOSIGNAL);
-        closesocket(s);
+      std::lock_guard<std::mutex> lk(completed_queue_mu);
+      drained.swap(completed_queue);
+    }
+    for (auto& conn : drained) {
+      if (conn.keep_alive) {
+        idle_connections.emplace(conn.s, std::move(conn.remote));
+      } else {
+        tracked_connections--;
+      }
+    }
+  };
+
+  while (true) {
+    drain_completed();
+#ifdef _WIN32
+    fd_set readfds;
+    FD_ZERO(&readfds);
+    FD_SET((SOCKET) server_fd, &readfds);
+    SOCKET maxfd = (SOCKET) server_fd;
+    for (const auto& conn : idle_connections) {
+      auto fd = (SOCKET) conn.first;
+      FD_SET(fd, &readfds);
+      if (fd > maxfd) {
+        maxfd = fd;
+      }
+    }
+    timeval timeout = {
+      .tv_sec = 0,
+      .tv_usec = 100000,
+    };
+    auto ready = select((int) maxfd + 1, &readfds, nullptr, nullptr, &timeout);
+    if (ready < 0) {
+      throw std::runtime_error("select");
+    }
+    auto server_ready = FD_ISSET((SOCKET) server_fd, &readfds);
+#else
+    std::vector<pollfd> fds;
+    fds.reserve(idle_connections.size() + 1);
+    fds.push_back(pollfd {
+      .fd = server_fd,
+      .events = POLLIN,
+      .revents = 0,
+    });
+    for (const auto& conn : idle_connections) {
+      fds.push_back(pollfd {
+        .fd = conn.first,
+        .events = POLLIN,
+        .revents = 0,
+      });
+    }
+    auto ready = poll(fds.data(), fds.size(), 100);
+    if (ready < 0) {
+      if (errno == EINTR) {
         continue;
       }
-      accept_queue.emplace_back(s, std::string(addr_buf));
+      throw std::runtime_error("poll");
     }
-    accept_queue_cv.notify_one();
+    auto server_ready = ready > 0 && (fds.front().revents & POLLIN);
+#endif
+    if (ready == 0) {
+      continue;
+    }
+
+    if (server_ready) {
+      if (tracked_connections.load() >= accept_queue_limit) {
+        struct sockaddr_in client_address{};
+        socklen_t client_addrlen = sizeof(client_address);
+        auto s = (int) accept(server_fd, (struct sockaddr *)&client_address, &client_addrlen);
+        if (s >= 0) {
+          static const std::string busy_response =
+              "HTTP/1.1 503 Service Unavailable\r\n"
+              "Content-Type: text/plain\r\n"
+              "Connection: Close\r\n"
+              "Content-Length: 19\r\n\r\n"
+              "Service Unavailable";
+          send(s, busy_response.data(), (int) busy_response.size(), MSG_NOSIGNAL);
+          closesocket(s);
+        }
+      } else {
+        struct sockaddr_in client_address{};
+        socklen_t client_addrlen = sizeof(client_address);
+        auto s = (int) accept(server_fd, (struct sockaddr *)&client_address, &client_addrlen);
+        if (s < 0) {
+          throw std::runtime_error("accept");
+        }
+        char addr_buf[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &client_address.sin_addr, addr_buf, INET_ADDRSTRLEN);
+        tracked_connections++;
+        {
+          std::lock_guard<std::mutex> lk(ready_queue_mu);
+          ready_queue.emplace_back(s, std::string(addr_buf));
+        }
+        ready_queue_cv.notify_one();
+      }
+    }
+
+#ifdef _WIN32
+    for (auto it = idle_connections.begin(); it != idle_connections.end();) {
+      auto current = it++;
+      if (FD_ISSET((SOCKET) current->first, &readfds)) {
+        std::lock_guard<std::mutex> lk(ready_queue_mu);
+        ready_queue.emplace_back(current->first, std::move(current->second));
+        idle_connections.erase(current);
+        ready_queue_cv.notify_one();
+      }
+    }
+#else
+    for (size_t i = 1; i < fds.size(); i++) {
+      auto it = idle_connections.find(fds[i].fd);
+      if (it == idle_connections.end()) {
+        continue;
+      }
+      if (fds[i].revents & (POLLERR | POLLHUP | POLLNVAL)) {
+        closesocket(it->first);
+        tracked_connections--;
+        idle_connections.erase(it);
+        continue;
+      }
+      if (fds[i].revents & POLLIN) {
+        {
+          std::lock_guard<std::mutex> lk(ready_queue_mu);
+          ready_queue.emplace_back(it->first, std::move(it->second));
+        }
+        idle_connections.erase(it);
+        ready_queue_cv.notify_one();
+      }
+    }
+#endif
   }
 }
 
