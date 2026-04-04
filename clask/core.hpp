@@ -121,6 +121,11 @@ struct path_segment {
   bool has_more;
 };
 
+enum class route_method {
+  get,
+  post,
+};
+
 inline void drain_completed_connections(server_runtime_state& runtime);
 inline void accept_ready_connection(
     int server_fd,
@@ -326,6 +331,16 @@ inline path_segment parse_path_segment(const std::string& path, size_t offset) {
     .placeholder = placeholder,
     .has_more = has_more,
   };
+}
+
+inline std::optional<route_method> parse_route_method(const std::string& method) {
+  if (method == "GET") {
+    return route_method::get;
+  }
+  if (method == "POST") {
+    return route_method::post;
+  }
+  return std::nullopt;
 }
 
 inline void initialize_network_runtime() {
@@ -1439,12 +1454,12 @@ private:
   unsigned int worker_count_;
   size_t accept_queue_limit_;
   int socket_timeout_ms_;
-  node* route_tree(const std::string&);
-  const node* route_tree(const std::string&) const;
+  node* route_tree(route_method);
+  const node* route_tree(route_method) const;
   template <typename Functor>
-  void register_route(const std::string&, const std::string&, Functor&&);
+  void register_route(route_method, const std::string&, Functor&&);
   void parse_tree(node&, const std::string&, const func_t&);
-  bool match(const std::string&, const std::string&, const std::function<void(const func_t& fn, const std::vector<std::string>&)>&) const;
+  bool match(route_method, const std::string&, const std::function<void(const func_t& fn, const std::vector<std::string>&)>&) const;
   bool handle_connection_socket(int, const std::string&, const server_runtime_config&) const;
   void _run(const std::string&, int);
 
@@ -1502,21 +1517,21 @@ inline server_t&& server_t::socket_timeout(int v) && {
   return std::move(*this);
 }
 
-inline node* server_t::route_tree(const std::string& method) {
-  if (method == "GET") {
+inline node* server_t::route_tree(route_method method) {
+  if (method == route_method::get) {
     return &treeGET;
   }
-  if (method == "POST") {
+  if (method == route_method::post) {
     return &treePOST;
   }
   return nullptr;
 }
 
-inline const node* server_t::route_tree(const std::string& method) const {
-  if (method == "GET") {
+inline const node* server_t::route_tree(route_method method) const {
+  if (method == route_method::get) {
     return &treeGET;
   }
-  if (method == "POST") {
+  if (method == route_method::post) {
     return &treePOST;
   }
   return nullptr;
@@ -1563,11 +1578,8 @@ inline void server_t::parse_tree(node& n, const std::string& s, const func_t& fn
   }
 }
 
-inline bool server_t::match(const std::string& method, const std::string& s, const std::function<void(const func_t& fn, const std::vector<std::string>&)>& fn) const {
+inline bool server_t::match(route_method method, const std::string& s, const std::function<void(const func_t& fn, const std::vector<std::string>&)>& fn) const {
   const node* n = route_tree(method);
-  if (n == nullptr) {
-    return false;
-  }
   std::vector<std::string> args;
   size_t offset = 0;
   while (offset < s.size()) {
@@ -1605,13 +1617,21 @@ inline bool server_t::handle_connection_socket(
       remote,
       config.socket_timeout_ms,
       [&](const std::string& method, const std::string& path, const auto& fn) {
-        return match(method, path, fn);
+        auto parsed_method = parse_route_method(method);
+        if (!parsed_method) {
+          return false;
+        }
+        return match(*parsed_method, path, fn);
       });
 }
 
 #ifdef CLASK_TEST
 bool server_t::test_match(const std::string& method, const std::string& s, const std::function<void(const func_t& fn, const std::vector<std::string>&)>& fn) const {
-  return server_t::match(method, s, fn);
+  auto parsed_method = parse_route_method(method);
+  if (!parsed_method) {
+    return false;
+  }
+  return server_t::match(*parsed_method, s, fn);
 }
 #endif
 
@@ -1640,26 +1660,22 @@ inline void prepare_handler_trees(node& treeGET, node& treePOST) {
 
 template <typename Functor>
 inline void server_t::register_route(
-    const std::string& method,
+    route_method method,
     const std::string& path,
     Functor&& assign_functor) {
-  auto tree = route_tree(method);
-  if (tree == nullptr) {
-    throw std::runtime_error("unsupported method");
-  }
   func_t func{};
   assign_functor(func);
-  parse_tree(*tree, path, func);
+  parse_tree(*route_tree(method), path, func);
 }
 
 #define CLASK_DEFINE_REQUEST(name) \
 inline void server_t::GET(const std::string& path, functor_ ## name fn) { \
-  register_route("GET", path, [&](func_t& func) { \
+  register_route(route_method::get, path, [&](func_t& func) { \
     func.f_ ## name = std::move(fn); \
   }); \
 } \
 inline void server_t::POST(const std::string& path, functor_ ## name fn) { \
-  register_route("POST", path, [&](func_t& func) { \
+  register_route(route_method::post, path, [&](func_t& func) { \
     func.f_ ## name = std::move(fn); \
   }); \
 }
@@ -1739,7 +1755,7 @@ inline void serve_file(response_writer& resp, request& req, const std::string& p
 }
 
 inline void server_t::static_dir(const std::string& path, const std::string& dir, bool listing) {
-  register_route("GET", path, [&](func_t& func) {
+  register_route(route_method::get, path, [&](func_t& func) {
     func.f_writer = [path, dir, listing](response_writer& resp, request& req) {
       auto resolved = resolve_static_path(req.uri, path, dir);
       if (resolved.forbidden) {
