@@ -61,6 +61,7 @@ namespace clask {
 
 constexpr int keep_alive_timeout_ms = 5000;
 constexpr size_t accept_queue_factor = 64;
+constexpr unsigned int default_worker_count = 4;
 inline bool set_socket_timeout(int s, int optname, int timeout_ms) {
 #ifdef _WIN32
   DWORD timeout = (DWORD) timeout_ms;
@@ -735,6 +736,9 @@ private:
   std::string compiled_tree;
   node treeGET;
   node treePOST;
+  unsigned int worker_count_;
+  size_t accept_queue_limit_;
+  int socket_timeout_ms_;
   void parse_tree(node&, const std::string&, const func_t&);
   bool match(const std::string&, const std::string&, const std::function<void(const func_t& fn, const std::vector<std::string>&)>&) const;
   void _run(const std::string&, int);
@@ -748,14 +752,32 @@ void POST(const std::string&, const functor_ ## name);
   CLASK_DEFINE_REQUEST(response)
 #undef CLASK_DEFINE_REQUEST
   void static_dir(const std::string&, const std::string&, bool listing = false);
+  server_t& worker_count(unsigned int);
+  server_t& accept_queue_limit(size_t);
+  server_t& socket_timeout(int);
   void run(const std::string&);
   void run(int);
   logger log;
-  server_t() : treeGET{}, treePOST{} {}
+  server_t() : treeGET{}, treePOST{}, worker_count_{0}, accept_queue_limit_{0}, socket_timeout_ms_{keep_alive_timeout_ms} {}
 #ifdef CLASK_TEST
   bool test_match(const std::string&, const std::string&, const std::function<void(const func_t& fn, const std::vector<std::string>&)>&) const;
 #endif
 };
+
+inline server_t& server_t::worker_count(unsigned int v) {
+  worker_count_ = v;
+  return *this;
+}
+
+inline server_t& server_t::accept_queue_limit(size_t v) {
+  accept_queue_limit_ = v;
+  return *this;
+}
+
+inline server_t& server_t::socket_timeout(int v) {
+  socket_timeout_ms_ = v;
+  return *this;
+}
 
 inline void server_t::parse_tree(node& n, const std::string& s, const func_t& fn) {
   auto pos = s.find('/', 1);
@@ -1041,8 +1063,8 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
   }
 
   auto handle_connection = [&](int s, const std::string& remote) {
-    if (!set_socket_timeout(s, SO_RCVTIMEO, keep_alive_timeout_ms)
-        || !set_socket_timeout(s, SO_SNDTIMEO, keep_alive_timeout_ms)) {
+    if (!set_socket_timeout(s, SO_RCVTIMEO, socket_timeout_ms_)
+        || !set_socket_timeout(s, SO_SNDTIMEO, socket_timeout_ms_)) {
       closesocket(s);
       return;
     }
@@ -1184,13 +1206,17 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
   std::mutex accept_queue_mu;
   std::condition_variable accept_queue_cv;
   std::deque<std::pair<int, std::string>> accept_queue;
-  unsigned int worker_count = std::thread::hardware_concurrency();
+  unsigned int worker_count = worker_count_;
   if (worker_count == 0) {
-    worker_count = 4;
-  } else {
-    worker_count *= 2;
+    worker_count = std::thread::hardware_concurrency();
+    if (worker_count == 0) {
+      worker_count = default_worker_count;
+    } else {
+      worker_count *= 2;
+    }
   }
-  const size_t accept_queue_limit = worker_count * accept_queue_factor;
+  const size_t accept_queue_limit =
+      accept_queue_limit_ > 0 ? accept_queue_limit_ : worker_count * accept_queue_factor;
 
   for (unsigned int n = 0; n < worker_count; n++) {
     std::thread([&]() {
