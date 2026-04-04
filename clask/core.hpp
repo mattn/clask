@@ -60,6 +60,7 @@ typedef int sockopt_t;
 namespace clask {
 
 constexpr int keep_alive_timeout_ms = 5000;
+constexpr size_t accept_queue_factor = 64;
 inline bool set_socket_timeout(int s, int optname, int timeout_ms) {
 #ifdef _WIN32
   DWORD timeout = (DWORD) timeout_ms;
@@ -1189,6 +1190,7 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
   } else {
     worker_count *= 2;
   }
+  const size_t accept_queue_limit = worker_count * accept_queue_factor;
 
   for (unsigned int n = 0; n < worker_count; n++) {
     std::thread([&]() {
@@ -1216,6 +1218,17 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
     inet_ntop(AF_INET, &client_address.sin_addr, addr_buf, INET_ADDRSTRLEN);
     {
       std::lock_guard<std::mutex> lk(accept_queue_mu);
+      if (accept_queue.size() >= accept_queue_limit) {
+        static const std::string busy_response =
+            "HTTP/1.1 503 Service Unavailable\r\n"
+            "Content-Type: text/plain\r\n"
+            "Connection: Close\r\n"
+            "Content-Length: 19\r\n\r\n"
+            "Service Unavailable";
+        send(s, busy_response.data(), (int) busy_response.size(), MSG_NOSIGNAL);
+        closesocket(s);
+        continue;
+      }
       accept_queue.emplace_back(s, std::string(addr_buf));
     }
     accept_queue_cv.notify_one();
