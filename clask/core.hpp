@@ -200,6 +200,43 @@ inline bool accept_connection(
   return true;
 }
 
+inline int create_listening_socket(const std::string& host, int port) {
+  int server_fd;
+  struct sockaddr_in address{};
+  sockopt_t opt = 1;
+
+  if ((server_fd = (int) socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+    throw std::runtime_error("socket failed");
+  }
+
+  if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, (int) sizeof(opt))) {
+    throw std::runtime_error("setsockopt");
+  }
+  address.sin_family = AF_INET;
+  if (host.empty()) {
+    address.sin_addr.s_addr = htonl(INADDR_ANY);
+  } else {
+    struct addrinfo hints{}, *result = nullptr;
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    if (getaddrinfo(host.c_str(), nullptr, &hints, &result) != 0 || result == nullptr) {
+      if (result) freeaddrinfo(result);
+      throw std::runtime_error("getaddrinfo failed");
+    }
+    address.sin_addr = ((struct sockaddr_in*)result->ai_addr)->sin_addr;
+    freeaddrinfo(result);
+  }
+  address.sin_port = htons((u_short) port);
+
+  if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
+    throw std::runtime_error("bind failed");
+  }
+  if (listen(server_fd, SOMAXCONN) < 0) {
+    throw std::runtime_error("listen");
+  }
+  return server_fd;
+}
+
 inline void send_text_response(
     int s,
     int code,
@@ -1337,10 +1374,6 @@ inline void server_t::static_dir(const std::string& path, const std::string& dir
 }
 
 inline void server_t::_run(const std::string& host, int port = 8080) {
-  int server_fd;
-  struct sockaddr_in address{};
-  sockopt_t opt = 1;
-
 #ifdef _WIN32
   WSADATA wsa;
   (void) WSAStartup(MAKEWORD(2, 0), &wsa);
@@ -1356,35 +1389,7 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
   }
 #endif
 
-  if ((server_fd = (int) socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-    throw std::runtime_error("socket failed");
-  }
-
-  if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, (int) sizeof(opt))) {
-    throw std::runtime_error("setsockopt");
-  }
-  address.sin_family = AF_INET;
-  if (host.empty()) {
-    address.sin_addr.s_addr = htonl(INADDR_ANY);
-  } else {
-    struct addrinfo hints{}, *result = nullptr;
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
-    if (getaddrinfo(host.c_str(), nullptr, &hints, &result) != 0 || result == nullptr) {
-      if (result) freeaddrinfo(result);
-      throw std::runtime_error("getaddrinfo failed");
-    }
-    address.sin_addr = ((struct sockaddr_in*)result->ai_addr)->sin_addr;
-    freeaddrinfo(result);
-  }
-  address.sin_port = htons((u_short) port);
-
-  if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
-    throw std::runtime_error("bind failed");
-  }
-  if (listen(server_fd, SOMAXCONN) < 0) {
-    throw std::runtime_error("listen");
-  }
+  auto server_fd = create_listening_socket(host, port);
 
   auto handle_connection = [&](int s, const std::string& remote) {
     if (!set_socket_timeout(s, SO_RCVTIMEO, socket_timeout_ms_)
