@@ -225,6 +225,11 @@ void test_clask_parse_listen_address() {
     _ok(addr.host == "", R"(addr.host == "")");
     _ok(addr.port == 8080, R"(addr.port == 8080)");
   }
+  {
+    auto addr = clask::parse_listen_address("0.0.0.0:0");
+    _ok(addr.host == "0.0.0.0", R"(addr.host == "0.0.0.0")");
+    _ok(addr.port == 0, R"(addr.port == 0)");
+  }
 }
 
 void test_clask_parse_route_method() {
@@ -288,6 +293,7 @@ void test_clask_server_runtime_helpers() {
   _ok(
       clask::resolve_accept_queue_limit(0, 7) == 7 * clask::accept_queue_factor,
       R"(clask::resolve_accept_queue_limit(0, 7) == 7 * clask::accept_queue_factor)");
+  _ok(clask::resolve_worker_count(1) == 1, R"(clask::resolve_worker_count(1) == 1)");
   {
     auto config = clask::resolve_server_runtime_config(7, 123, 4567);
     _ok(config.worker_count == 7, R"(config.worker_count == 7)");
@@ -301,6 +307,14 @@ void test_clask_server_runtime_helpers() {
         config.accept_queue_limit == 7 * clask::accept_queue_factor,
         R"(config.accept_queue_limit == 7 * clask::accept_queue_factor)");
     _ok(config.socket_timeout_ms == 5000, R"(config.socket_timeout_ms == 5000)");
+  }
+  {
+    auto config = clask::resolve_server_runtime_config(1, 0, 0);
+    _ok(config.worker_count == 1, R"(config.worker_count == 1)");
+    _ok(
+        config.accept_queue_limit == clask::accept_queue_factor,
+        R"(config.accept_queue_limit == clask::accept_queue_factor)");
+    _ok(config.socket_timeout_ms == 0, R"(config.socket_timeout_ms == 0)");
   }
 }
 
