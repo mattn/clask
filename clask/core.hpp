@@ -60,8 +60,6 @@ typedef int sockopt_t;
 namespace clask {
 
 constexpr int keep_alive_timeout_ms = 5000;
-constexpr size_t keep_alive_max_requests = 100;
-
 inline bool set_socket_timeout(int s, int optname, int timeout_ms) {
 #ifdef _WIN32
   DWORD timeout = (DWORD) timeout_ms;
@@ -1049,7 +1047,6 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
     }
 
     bool keep_connection_alive = true;
-    size_t requests_served = 0;
     auto send_text_response = [&](int code, const std::string& reason, const std::string& body, bool keep_alive) {
       std::ostringstream os;
       os << "HTTP/1.1 " << code << " " << reason
@@ -1121,7 +1118,7 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
         }
       }
 
-      bool keep_alive = minor_version == 1;
+      bool keep_alive = false;
       bool has_content_length = false;
       size_t content_length = 0;
       for (size_t n = 0; n < num_headers; n++) {
@@ -1131,19 +1128,9 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
         if (key == "Content-Length") {
           content_length = std::stoi(val);
           has_content_length = true;
-        } else if (key == "Connection") {
-          for (auto& c : val) c = (char) std::tolower(c);
-          if (val == "keep-alive")
-            keep_alive = true;
-          else if (val == "close")
-            keep_alive = false;
         }
         req_headers.emplace_back(std::move(key), std::move(val));
       }
-      if (keep_alive && requests_served + 1 >= keep_alive_max_requests) {
-        keep_alive = false;
-      }
-
       if (has_content_length && buflen - pret < content_length) {
         auto rest = content_length - (buflen - pret);
         buflen = 0;
@@ -1188,8 +1175,6 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
 #endif
         send_text_response(404, "Not Found", "Not Found", keep_alive);
       }
-
-      requests_served++;
       keep_connection_alive = keep_alive;
     }
     closesocket(s);
