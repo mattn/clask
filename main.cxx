@@ -2,6 +2,7 @@
 #include <clask/core.hpp>
 
 int main() {
+  // Tune the pooled runtime explicitly so the example shows the current defaults.
   auto s = clask::server()
     .worker_count(32)
     .accept_queue_limit(4096)
