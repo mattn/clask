@@ -84,21 +84,18 @@ protected:
   bool enabled;
 
 private:
-  //logger(const logger&);
-  logger& operator =(const logger&);
+  logger(const logger&) = delete;
+  logger& operator =(const logger&) = delete;
 
 public:
   static log_level default_level;
   logger() : lv(clask::log_level::INFO), enabled(false) {};
+  logger(logger&&) = default;
+  logger& operator =(logger&&) = default;
   virtual ~logger();
   std::ostringstream& get(log_level level = log_level::INFO);
   static log_level& level();
 };
-
-inline logger& logger::operator =(const logger& l) {
-  this->lv = l.lv;
-  return *this;
-}
 
 inline std::ostringstream& logger::get(log_level level) {
   lv = level;
