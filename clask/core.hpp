@@ -261,6 +261,13 @@ inline int create_listening_socket(const std::string& host, int port) {
   return server_fd;
 }
 
+inline void initialize_network_runtime() {
+#ifdef _WIN32
+  WSADATA wsa;
+  (void) WSAStartup(MAKEWORD(2, 0), &wsa);
+#endif
+}
+
 inline unsigned int resolve_worker_count(unsigned int configured_worker_count) {
   auto worker_count = configured_worker_count;
   if (worker_count == 0) {
@@ -1456,6 +1463,18 @@ inline void sort_handlers(node& n) {
   }
 }
 
+inline void prepare_handler_trees(node& treeGET, node& treePOST) {
+  sort_handlers(treeGET);
+  sort_handlers(treePOST);
+
+#if 0
+  for (auto v : treeGET.children) {
+    std::cout << v.name << std::endl;
+    std::cout << v.placeholder << std::endl;
+  }
+#endif
+}
+
 #define CLASK_DEFINE_REQUEST(name) \
 inline void server_t::GET(const std::string& path, functor_ ## name fn) { \
   func_t func{}; \
@@ -1590,20 +1609,8 @@ inline void server_t::static_dir(const std::string& path, const std::string& dir
 }
 
 inline void server_t::_run(const std::string& host, int port = 8080) {
-#ifdef _WIN32
-  WSADATA wsa;
-  (void) WSAStartup(MAKEWORD(2, 0), &wsa);
-#endif
-
-  sort_handlers(treeGET);
-  sort_handlers(treePOST);
-
-#if 0
-  for (auto v : treeGET.children) {
-    std::cout << v.name << std::endl;
-    std::cout << v.placeholder << std::endl;
-  }
-#endif
+  initialize_network_runtime();
+  prepare_handler_trees(treeGET, treePOST);
 
   auto server_fd = create_listening_socket(host, port);
 
