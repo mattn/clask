@@ -1448,7 +1448,6 @@ typedef struct _node {
 
 class server_t {
 private:
-  std::string compiled_tree;
   node get_routes_;
   node post_routes_;
   unsigned int worker_count_;
@@ -1649,13 +1648,6 @@ inline void sort_handlers(node& n) {
 inline void prepare_handler_trees(node& get_routes, node& post_routes) {
   sort_handlers(get_routes);
   sort_handlers(post_routes);
-
-#if 0
-  for (auto v : get_routes.children) {
-    std::cout << v.name << std::endl;
-    std::cout << v.placeholder << std::endl;
-  }
-#endif
 }
 
 template <typename Functor>
