@@ -1380,6 +1380,8 @@ private:
   unsigned int worker_count_;
   size_t accept_queue_limit_;
   int socket_timeout_ms_;
+  node& route_tree(const std::string&);
+  const node& route_tree(const std::string&) const;
   void parse_tree(node&, const std::string&, const func_t&);
   bool match(const std::string&, const std::string&, const std::function<void(const func_t& fn, const std::vector<std::string>&)>&) const;
   bool handle_connection_socket(int, const std::string&, const server_runtime_config&) const;
@@ -1439,6 +1441,14 @@ inline server_t&& server_t::socket_timeout(int v) && {
   return std::move(*this);
 }
 
+inline node& server_t::route_tree(const std::string& method) {
+  return method == "GET" ? treeGET : treePOST;
+}
+
+inline const node& server_t::route_tree(const std::string& method) const {
+  return method == "GET" ? treeGET : treePOST;
+}
+
 inline void server_t::parse_tree(node& n, const std::string& s, const func_t& fn) {
   auto pos = s.find('/', 1);
   auto placeholder = s[1] == ':';
@@ -1485,7 +1495,7 @@ inline void server_t::parse_tree(node& n, const std::string& s, const func_t& fn
 }
 
 inline bool server_t::match(const std::string& method, const std::string& s, const std::function<void(const func_t& fn, const std::vector<std::string>&)>& fn) const {
-  const node* n = method == "GET" ? &treeGET : &treePOST;
+  const node* n = &route_tree(method);
   std::vector<std::string> args;
   size_t offset = 0;
   while (offset < s.size()) {
@@ -1568,12 +1578,12 @@ inline void prepare_handler_trees(node& treeGET, node& treePOST) {
 inline void server_t::GET(const std::string& path, functor_ ## name fn) { \
   func_t func{}; \
   func.f_ ## name = std::move(fn); \
-  parse_tree(treeGET, path, func); \
+  parse_tree(route_tree("GET"), path, func); \
 } \
 inline void server_t::POST(const std::string& path, functor_ ## name fn) { \
   func_t func{}; \
   func.f_ ## name = std::move(fn); \
-  parse_tree(treePOST, path, func); \
+  parse_tree(route_tree("POST"), path, func); \
 }
 
 CLASK_DEFINE_REQUEST(writer)
@@ -1684,7 +1694,7 @@ inline void server_t::static_dir(const std::string& path, const std::string& dir
 
     serve_file(resp, req, req_path);
   };
-  parse_tree(treeGET, path, func);
+  parse_tree(route_tree("GET"), path, func);
 }
 
 inline void server_t::_run(const std::string& host, int port = 8080) {

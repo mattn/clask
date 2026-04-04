@@ -160,6 +160,21 @@ void test_clask_request_uri_param() {
   }
 }
 
+void test_clask_post_route_match() {
+  auto s = clask::server();
+  s.POST("/submit/:id", [](clask::request& req) -> std::string {
+    return req.args[0];
+  });
+
+  std::vector<std::string> req_args;
+  auto result = s.test_match("POST", "/submit/42", [&](const clask::func_t& /*fn*/, const std::vector<std::string>& args) {
+    req_args = args;
+  });
+  _ok(result == true, R"(result == true)");
+  _ok(req_args.size() == 1, R"(req_args.size() == 1)");
+  _ok(req_args[0] == "42", R"(req_args[0] == "42")");
+}
+
 void test_clask_parse_listen_address() {
   {
     auto [host, port] = clask::parse_listen_address("127.0.0.1:8080");
@@ -249,6 +264,7 @@ int main() {
   subtest("test_clask_request_parse_multipart4", test_clask_request_parse_multipart4);
   subtest("test_clask_to_wstring", test_clask_to_wstring);
   subtest("test_clask_request_uri_param", test_clask_request_uri_param);
+  subtest("test_clask_post_route_match", test_clask_post_route_match);
   subtest("test_clask_parse_listen_address", test_clask_parse_listen_address);
   subtest("test_clask_server_runtime_helpers", test_clask_server_runtime_helpers);
   subtest("test_clask_fluent_server_setup", test_clask_fluent_server_setup);
