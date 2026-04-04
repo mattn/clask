@@ -261,6 +261,14 @@ inline int create_listening_socket(const std::string& host, int port) {
   return server_fd;
 }
 
+inline std::pair<std::string, int> parse_listen_address(const std::string& addr) {
+  auto pos = addr.find_last_of(':');
+  if (pos == std::string::npos) {
+    throw std::runtime_error("invalid host:port");
+  }
+  return std::make_pair(addr.substr(0, pos), std::stoi(addr.substr(pos + 1)));
+}
+
 inline void initialize_network_runtime() {
 #ifdef _WIN32
   WSADATA wsa;
@@ -1640,12 +1648,7 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
 }
 
 inline void server_t::run(const std::string& addr) {
-  auto pos = addr.find_last_of(':');
-  if (pos == std::string::npos) {
-    throw std::runtime_error("invalid host:port");
-  }
-  auto host = addr.substr(0, pos);
-  auto port = std::stoi(addr.substr(pos + 1));
+  auto [host, port] = parse_listen_address(addr);
   _run(host, port);
 }
 
