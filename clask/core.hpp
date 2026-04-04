@@ -64,6 +64,18 @@ namespace clask {
 constexpr int keep_alive_timeout_ms = 5000;
 constexpr size_t accept_queue_factor = 64;
 constexpr unsigned int default_worker_count = 4;
+
+struct socket_wait_event {
+  int fd;
+  bool readable;
+  bool closed;
+};
+
+struct socket_wait_result {
+  bool server_readable;
+  std::vector<socket_wait_event> events;
+};
+
 inline bool set_socket_timeout(int s, int optname, int timeout_ms) {
 #ifdef _WIN32
   DWORD timeout = (DWORD) timeout_ms;
@@ -75,6 +87,83 @@ inline bool set_socket_timeout(int s, int optname, int timeout_ms) {
   };
   return setsockopt(s, SOL_SOCKET, optname, &timeout, sizeof(timeout)) == 0;
 #endif
+}
+
+inline socket_wait_result wait_socket_events(
+    int server_fd,
+    const std::unordered_map<int, std::string>& idle_connections,
+    int timeout_ms) {
+  socket_wait_result result{
+    .server_readable = false,
+    .events = {},
+  };
+#ifdef _WIN32
+  fd_set readfds;
+  FD_ZERO(&readfds);
+  FD_SET((SOCKET) server_fd, &readfds);
+  SOCKET maxfd = (SOCKET) server_fd;
+  for (const auto& conn : idle_connections) {
+    auto fd = (SOCKET) conn.first;
+    FD_SET(fd, &readfds);
+    if (fd > maxfd) {
+      maxfd = fd;
+    }
+  }
+  timeval timeout = {
+    .tv_sec = timeout_ms / 1000,
+    .tv_usec = (timeout_ms % 1000) * 1000,
+  };
+  auto ready = select((int) maxfd + 1, &readfds, nullptr, nullptr, &timeout);
+  if (ready < 0) {
+    throw std::runtime_error("select");
+  }
+  result.server_readable = FD_ISSET((SOCKET) server_fd, &readfds);
+  result.events.reserve(idle_connections.size());
+  for (const auto& conn : idle_connections) {
+    if (FD_ISSET((SOCKET) conn.first, &readfds)) {
+      result.events.push_back(socket_wait_event {
+        .fd = conn.first,
+        .readable = true,
+        .closed = false,
+      });
+    }
+  }
+#else
+  std::vector<pollfd> fds;
+  fds.reserve(idle_connections.size() + 1);
+  fds.push_back(pollfd {
+    .fd = server_fd,
+    .events = POLLIN,
+    .revents = 0,
+  });
+  for (const auto& conn : idle_connections) {
+    fds.push_back(pollfd {
+      .fd = conn.first,
+      .events = POLLIN,
+      .revents = 0,
+    });
+  }
+  auto ready = poll(fds.data(), fds.size(), timeout_ms);
+  if (ready < 0) {
+    if (errno == EINTR) {
+      return result;
+    }
+    throw std::runtime_error("poll");
+  }
+  result.server_readable = ready > 0 && (fds.front().revents & POLLIN);
+  result.events.reserve(idle_connections.size());
+  for (size_t i = 1; i < fds.size(); i++) {
+    if (fds[i].revents == 0) {
+      continue;
+    }
+    result.events.push_back(socket_wait_event {
+      .fd = fds[i].fd,
+      .readable = (fds[i].revents & POLLIN) != 0,
+      .closed = (fds[i].revents & (POLLERR | POLLHUP | POLLNVAL)) != 0,
+    });
+  }
+#endif
+  return result;
 }
 
 typedef enum class _log_level {ERR, WARN, INFO, DEBUG} log_level;
@@ -1289,56 +1378,12 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
 
   while (true) {
     drain_completed();
-#ifdef _WIN32
-    fd_set readfds;
-    FD_ZERO(&readfds);
-    FD_SET((SOCKET) server_fd, &readfds);
-    SOCKET maxfd = (SOCKET) server_fd;
-    for (const auto& conn : idle_connections) {
-      auto fd = (SOCKET) conn.first;
-      FD_SET(fd, &readfds);
-      if (fd > maxfd) {
-        maxfd = fd;
-      }
-    }
-    timeval timeout = {
-      .tv_sec = 0,
-      .tv_usec = 100000,
-    };
-    auto ready = select((int) maxfd + 1, &readfds, nullptr, nullptr, &timeout);
-    if (ready < 0) {
-      throw std::runtime_error("select");
-    }
-    auto server_ready = FD_ISSET((SOCKET) server_fd, &readfds);
-#else
-    std::vector<pollfd> fds;
-    fds.reserve(idle_connections.size() + 1);
-    fds.push_back(pollfd {
-      .fd = server_fd,
-      .events = POLLIN,
-      .revents = 0,
-    });
-    for (const auto& conn : idle_connections) {
-      fds.push_back(pollfd {
-        .fd = conn.first,
-        .events = POLLIN,
-        .revents = 0,
-      });
-    }
-    auto ready = poll(fds.data(), fds.size(), 100);
-    if (ready < 0) {
-      if (errno == EINTR) {
-        continue;
-      }
-      throw std::runtime_error("poll");
-    }
-    auto server_ready = ready > 0 && (fds.front().revents & POLLIN);
-#endif
-    if (ready == 0) {
+    auto wait_result = wait_socket_events(server_fd, idle_connections, 100);
+    if (!wait_result.server_readable && wait_result.events.empty()) {
       continue;
     }
 
-    if (server_ready) {
+    if (wait_result.server_readable) {
       if (tracked_connections.load() >= accept_queue_limit) {
         struct sockaddr_in client_address{};
         socklen_t client_addrlen = sizeof(client_address);
@@ -1371,38 +1416,24 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
       }
     }
 
-#ifdef _WIN32
-    for (auto it = idle_connections.begin(); it != idle_connections.end();) {
-      auto current = it++;
-      if (FD_ISSET((SOCKET) current->first, &readfds)) {
-        std::lock_guard<std::mutex> lk(ready_queue_mu);
-        ready_queue.emplace_back(current->first, std::move(current->second));
-        idle_connections.erase(current);
-        ready_queue_cv.notify_one();
-      }
-    }
-#else
-    for (size_t i = 1; i < fds.size(); i++) {
-      auto it = idle_connections.find(fds[i].fd);
+    for (const auto& event : wait_result.events) {
+      auto it = idle_connections.find(event.fd);
       if (it == idle_connections.end()) {
         continue;
       }
-      if (fds[i].revents & (POLLERR | POLLHUP | POLLNVAL)) {
+      if (event.closed) {
         closesocket(it->first);
         tracked_connections--;
         idle_connections.erase(it);
         continue;
       }
-      if (fds[i].revents & POLLIN) {
-        {
-          std::lock_guard<std::mutex> lk(ready_queue_mu);
-          ready_queue.emplace_back(it->first, std::move(it->second));
-        }
+      if (event.readable) {
+        std::lock_guard<std::mutex> lk(ready_queue_mu);
+        ready_queue.emplace_back(it->first, std::move(it->second));
         idle_connections.erase(it);
         ready_queue_cv.notify_one();
       }
     }
-#endif
   }
 }
 
