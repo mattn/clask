@@ -76,6 +76,11 @@ struct socket_wait_result {
   std::vector<socket_wait_event> events;
 };
 
+struct connection_state {
+  int fd;
+  std::string remote;
+};
+
 inline bool set_socket_timeout(int s, int optname, int timeout_ms) {
 #ifdef _WIN32
   DWORD timeout = (DWORD) timeout_ms;
@@ -91,7 +96,7 @@ inline bool set_socket_timeout(int s, int optname, int timeout_ms) {
 
 inline socket_wait_result wait_socket_events(
     int server_fd,
-    const std::unordered_map<int, std::string>& idle_connections,
+    const std::unordered_map<int, connection_state>& idle_connections,
     int timeout_ms) {
   socket_wait_result result{
     .server_readable = false,
@@ -103,7 +108,7 @@ inline socket_wait_result wait_socket_events(
   FD_SET((SOCKET) server_fd, &readfds);
   SOCKET maxfd = (SOCKET) server_fd;
   for (const auto& conn : idle_connections) {
-    auto fd = (SOCKET) conn.first;
+    auto fd = (SOCKET) conn.second.fd;
     FD_SET(fd, &readfds);
     if (fd > maxfd) {
       maxfd = fd;
@@ -120,9 +125,9 @@ inline socket_wait_result wait_socket_events(
   result.server_readable = FD_ISSET((SOCKET) server_fd, &readfds);
   result.events.reserve(idle_connections.size());
   for (const auto& conn : idle_connections) {
-    if (FD_ISSET((SOCKET) conn.first, &readfds)) {
+    if (FD_ISSET((SOCKET) conn.second.fd, &readfds)) {
       result.events.push_back(socket_wait_event {
-        .fd = conn.first,
+        .fd = conn.second.fd,
         .readable = true,
         .closed = false,
       });
@@ -138,7 +143,7 @@ inline socket_wait_result wait_socket_events(
   });
   for (const auto& conn : idle_connections) {
     fds.push_back(pollfd {
-      .fd = conn.first,
+      .fd = conn.second.fd,
       .events = POLLIN,
       .revents = 0,
     });
@@ -1314,17 +1319,16 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
   };
 
   struct completed_connection {
-    int s;
-    std::string remote;
+    connection_state conn;
     bool keep_alive;
   };
 
   std::mutex ready_queue_mu;
   std::condition_variable ready_queue_cv;
-  std::deque<std::pair<int, std::string>> ready_queue;
+  std::deque<connection_state> ready_queue;
   std::mutex completed_queue_mu;
   std::deque<completed_connection> completed_queue;
-  std::unordered_map<int, std::string> idle_connections;
+  std::unordered_map<int, connection_state> idle_connections;
   std::atomic<size_t> tracked_connections{0};
   unsigned int worker_count = worker_count_;
   if (worker_count == 0) {
@@ -1341,20 +1345,19 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
   for (unsigned int n = 0; n < worker_count; n++) {
     std::thread([&]() {
       while (true) {
-        std::pair<int, std::string> conn;
+        connection_state conn;
         {
           std::unique_lock<std::mutex> lk(ready_queue_mu);
           ready_queue_cv.wait(lk, [&]() { return !ready_queue.empty(); });
           conn = std::move(ready_queue.front());
           ready_queue.pop_front();
         }
-        auto keep_alive = handle_connection(conn.first, conn.second);
+        auto keep_alive = handle_connection(conn.fd, conn.remote);
         {
           std::lock_guard<std::mutex> lk(completed_queue_mu);
           completed_queue.push_back(completed_connection{
-            conn.first,
-            std::move(conn.second),
-            keep_alive,
+            .conn = std::move(conn),
+            .keep_alive = keep_alive,
           });
         }
       }
@@ -1369,7 +1372,7 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
     }
     for (auto& conn : drained) {
       if (conn.keep_alive) {
-        idle_connections.emplace(conn.s, std::move(conn.remote));
+        idle_connections.emplace(conn.conn.fd, std::move(conn.conn));
       } else {
         tracked_connections--;
       }
@@ -1410,7 +1413,10 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
         tracked_connections++;
         {
           std::lock_guard<std::mutex> lk(ready_queue_mu);
-          ready_queue.emplace_back(s, std::string(addr_buf));
+          ready_queue.emplace_back(connection_state{
+            .fd = s,
+            .remote = std::string(addr_buf),
+          });
         }
         ready_queue_cv.notify_one();
       }
@@ -1429,7 +1435,7 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
       }
       if (event.readable) {
         std::lock_guard<std::mutex> lk(ready_queue_mu);
-        ready_queue.emplace_back(it->first, std::move(it->second));
+        ready_queue.emplace_back(std::move(it->second));
         idle_connections.erase(it);
         ready_queue_cv.notify_one();
       }
