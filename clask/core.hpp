@@ -59,6 +59,22 @@ typedef int sockopt_t;
 
 namespace clask {
 
+constexpr int keep_alive_timeout_ms = 5000;
+constexpr size_t keep_alive_max_requests = 100;
+
+inline bool set_socket_timeout(int s, int optname, int timeout_ms) {
+#ifdef _WIN32
+  DWORD timeout = (DWORD) timeout_ms;
+  return setsockopt(s, SOL_SOCKET, optname, (const char*) &timeout, sizeof(timeout)) == 0;
+#else
+  struct timeval timeout = {
+    .tv_sec = timeout_ms / 1000,
+    .tv_usec = (timeout_ms % 1000) * 1000,
+  };
+  return setsockopt(s, SOL_SOCKET, optname, &timeout, sizeof(timeout)) == 0;
+#endif
+}
+
 typedef enum class _log_level {ERR, WARN, INFO, DEBUG} log_level;
 
 class logger {
@@ -668,11 +684,13 @@ inline int func_t::handle(int s, request& req, bool& keep_alive) const {
     send(s, hdr.data(), (int) hdr.size(), MSG_NOSIGNAL);
   } else if (f_writer != nullptr) {
     response_writer writer(s, 200);
+    writer.set_header("Connection", "Close");
     f_writer(writer, req);
     keep_alive = false;
     code = writer.code;
   } else if (f_response != nullptr) {
     auto res = f_response(req);
+    auto has_connection = false;
     std::string hdr;
     hdr.reserve(256 + res.content.size());
     hdr += "HTTP/1.1 ";
@@ -684,9 +702,16 @@ inline int func_t::handle(int s, request& req, bool& keep_alive) const {
       auto key = camelize(h.first);
       if (key == "Content-Length")
         continue;
+      if (key == "Connection")
+        has_connection = true;
       hdr += key;
       hdr += ": ";
       hdr += h.second;
+      hdr += "\r\n";
+    }
+    if (!has_connection) {
+      hdr += "Connection: ";
+      hdr += keep_alive ? "Keep-Alive" : "Close";
       hdr += "\r\n";
     }
     hdr += "Content-Length: ";
@@ -1017,7 +1042,23 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
   }
 
   auto handle_connection = [&](int s, const std::string& remote) {
+    if (!set_socket_timeout(s, SO_RCVTIMEO, keep_alive_timeout_ms)
+        || !set_socket_timeout(s, SO_SNDTIMEO, keep_alive_timeout_ms)) {
+      closesocket(s);
+      return;
+    }
+
     bool keep_connection_alive = true;
+    size_t requests_served = 0;
+    auto send_text_response = [&](int code, const std::string& reason, const std::string& body, bool keep_alive) {
+      std::ostringstream os;
+      os << "HTTP/1.1 " << code << " " << reason
+         << "\r\nContent-Type: text/plain\r\nConnection: "
+         << (keep_alive ? "Keep-Alive" : "Close")
+         << "\r\nContent-Length: " << body.size()
+         << "\r\n\r\n" << body;
+      send(s, os.str().data(), (int) os.str().size(), MSG_NOSIGNAL);
+    };
     while (keep_connection_alive) {
       keep_connection_alive = false;
       char buf[16384];
@@ -1099,6 +1140,9 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
         }
         req_headers.emplace_back(std::move(key), std::move(val));
       }
+      if (keep_alive && requests_served + 1 >= keep_alive_max_requests) {
+        keep_alive = false;
+      }
 
       if (has_content_length && buflen - pret < content_length) {
         auto rest = content_length - (buflen - pret);
@@ -1135,18 +1179,17 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
 #ifndef CLASK_DISABLE_LOGS
           CLASK_LOG(clask::log_level::WARN) << remote << " " << code << " " << req_method << " " << req_path;
 #endif
-          std::ostringstream os;
-          os << "HTTP/1.0 " << code << " Internal Server Error\r\nContent-Type: text/plain\r\n\r\nInternal Server Error";
-          send(s, os.str().data(), (int) os.str().size(), MSG_NOSIGNAL);
+          keep_alive = false;
+          send_text_response(code, "Internal Server Error", "Internal Server Error", keep_alive);
         }
       })) {
 #ifndef CLASK_DISABLE_LOGS
         CLASK_LOG(clask::log_level::WARN) << remote << " " << 404 << " " << req_method << " " << req_path;
 #endif
-        static const std::string res_content = "HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\n\r\nNot Found";
-        send(s, res_content.data(), (int) res_content.size(), MSG_NOSIGNAL);
+        send_text_response(404, "Not Found", "Not Found", keep_alive);
       }
 
+      requests_served++;
       keep_connection_alive = keep_alive;
     }
     closesocket(s);
