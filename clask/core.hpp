@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 #include <string>
+#include <optional>
 #include <unordered_map>
 #include <exception>
 #include <iostream>
@@ -198,6 +199,7 @@ inline bool accept_connection(
   };
   return true;
 }
+
 
 typedef enum class _log_level {ERR, WARN, INFO, DEBUG} log_level;
 
@@ -779,6 +781,143 @@ inline std::string request::cookie_value(const std::string& name) {
   return "";
 }
 
+struct request_read_result {
+  bool ok;
+  bool keep_alive;
+  int error_code;
+  const char* error_reason;
+  const char* error_body;
+  std::optional<request> req;
+};
+
+inline request_read_result read_request_from_socket(int s) {
+  char buf[16384];
+  const char *method, *path;
+  int pret, minor_version;
+  struct phr_header headers[100];
+  size_t buflen = 0, prevbuflen = 0, method_len, path_len, num_headers;
+  ssize_t rret;
+
+  while (true) {
+    while ((rret = recv(s, buf + buflen, (int) (sizeof(buf) - buflen), MSG_NOSIGNAL)) == -1 && errno == EINTR);
+    if (rret <= 0) {
+      return request_read_result{
+        .ok = false,
+        .keep_alive = false,
+        .error_code = 0,
+        .error_reason = "",
+        .error_body = "",
+        .req = std::nullopt,
+      };
+    }
+
+    prevbuflen = buflen;
+    buflen += rret;
+    num_headers = sizeof(headers) / sizeof(headers[0]);
+    pret = phr_parse_request(
+        buf, buflen, &method, &method_len, &path, &path_len,
+        &minor_version, headers, &num_headers, prevbuflen);
+    if (pret > 0) {
+      break;
+    }
+    if (pret == -1) {
+      return request_read_result{
+        .ok = false,
+        .keep_alive = false,
+        .error_code = 400,
+        .error_reason = "Bad Request",
+        .error_body = "Invalid Request",
+        .req = std::nullopt,
+      };
+    }
+    if (buflen == sizeof(buf)) {
+      return request_read_result{
+        .ok = false,
+        .keep_alive = false,
+        .error_code = 413,
+        .error_reason = "Payload Too Large",
+        .error_body = "Request Too Large",
+        .req = std::nullopt,
+      };
+    }
+  }
+
+  const std::string req_method(method, method_len);
+  std::string req_path(path, path_len);
+  std::string req_body(buf + pret, buflen - pret);
+  const std::string req_raw_path = req_path;
+  std::unordered_map<std::string, std::string> req_uri_params;
+  std::vector<header> req_headers;
+
+  auto pos = req_path.find('?');
+  if (pos != std::string::npos) {
+    req_path.resize(pos);
+    std::istringstream iss(req_raw_path.substr(pos + 1));
+    std::string keyval, key, val;
+    while (std::getline(iss, keyval, '&')) {
+      std::istringstream isk(keyval);
+      if(std::getline(std::getline(isk, key, '='), val)) {
+        req_uri_params[url_decode(key)] = url_decode(val);
+      }
+    }
+  }
+
+  bool keep_alive = minor_version == 1;
+  bool has_content_length = false;
+  size_t content_length = 0;
+  for (size_t n = 0; n < num_headers; n++) {
+    auto key = std::string(headers[n].name, headers[n].name_len);
+    auto val = std::string(headers[n].value, headers[n].value_len);
+    camelize(key);
+    if (key == "Content-Length") {
+      content_length = std::stoi(val);
+      has_content_length = true;
+    } else if (key == "Connection") {
+      for (auto& c : val) c = (char) std::tolower(c);
+      if (val == "keep-alive")
+        keep_alive = true;
+      else if (val == "close")
+        keep_alive = false;
+    }
+    req_headers.emplace_back(std::move(key), std::move(val));
+  }
+
+  if (has_content_length && buflen - pret < content_length) {
+    auto rest = content_length - (buflen - pret);
+    buflen = 0;
+    while (rest > 0) {
+      while ((rret = recv(s, buf + buflen, (int) (sizeof(buf) - buflen), MSG_NOSIGNAL)) == -1 && errno == EINTR);
+      if (rret <= 0) {
+        return request_read_result{
+          .ok = false,
+          .keep_alive = false,
+          .error_code = 0,
+          .error_reason = "",
+          .error_body = "",
+          .req = std::nullopt,
+        };
+      }
+      req_body.append(buf, rret);
+      rest -= rret;
+    }
+  }
+
+  return request_read_result{
+    .ok = true,
+    .keep_alive = keep_alive,
+    .error_code = 0,
+    .error_reason = "",
+    .error_body = "",
+    .req = request(
+        req_method,
+        req_raw_path,
+        req_path,
+        std::move(req_uri_params),
+        std::move(req_headers),
+        std::move(req_body)),
+  };
+}
+
 typedef std::function<void(response_writer&, request&)> functor_writer;
 typedef std::function<std::string(request&)> functor_string;
 typedef std::function<response(request&)> functor_response;
@@ -1217,126 +1356,46 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
          << "\r\n\r\n" << body;
       send(s, os.str().data(), (int) os.str().size(), MSG_NOSIGNAL);
     };
-    char buf[16384];
-    const char *method, *path;
-    int pret, minor_version;
-    struct phr_header headers[100];
-    size_t buflen = 0, prevbuflen = 0, method_len, path_len, num_headers;
-    ssize_t rret;
-
-    while (true) {
-      while ((rret = recv(s, buf + buflen, (int) (sizeof(buf) - buflen), MSG_NOSIGNAL)) == -1 && errno == EINTR);
-      if (rret <= 0) {
-        closesocket(s);
-        return false;
-      }
-
-      prevbuflen = buflen;
-      buflen += rret;
-      num_headers = sizeof(headers) / sizeof(headers[0]);
-      pret = phr_parse_request(
-          buf, buflen, &method, &method_len, &path, &path_len,
-          &minor_version, headers, &num_headers, prevbuflen);
-      if (pret > 0) {
-        break;
-      }
-      if (pret == -1) {
- #ifndef CLASK_DISABLE_LOGS
+    auto read_result = read_request_from_socket(s);
+    if (!read_result.ok) {
+#ifndef CLASK_DISABLE_LOGS
+      if (read_result.error_code == 400) {
         CLASK_LOG(clask::log_level::ERR) << "invalid request";
- #endif
-        closesocket(s);
-        return false;
-      }
-      if (buflen == sizeof(buf)) {
- #ifndef CLASK_DISABLE_LOGS
+      } else if (read_result.error_code == 413) {
         CLASK_LOG(clask::log_level::ERR) << "request is too long";
- #endif
-        send_text_response(413, "Payload Too Large", "Request Too Large", false);
-        closesocket(s);
-        return false;
       }
+#endif
+      if (read_result.error_code != 0) {
+        send_text_response(
+            read_result.error_code,
+            read_result.error_reason,
+            read_result.error_body,
+            false);
+      }
+      closesocket(s);
+      return false;
     }
 
-    const std::string req_method(method, method_len);
-    std::string req_path(path, path_len);
-    std::string req_body(buf + pret, buflen - pret);
-    const std::string req_raw_path = req_path;
-    std::unordered_map<std::string, std::string> req_uri_params;
-    std::vector<header> req_headers;
-
-    auto pos = req_path.find('?');
-    if (pos != std::string::npos) {
-      req_path.resize(pos);
-      std::istringstream iss(req_raw_path.substr(pos + 1));
-      std::string keyval, key, val;
-      while (std::getline(iss, keyval, '&')) {
-        std::istringstream isk(keyval);
-        if(std::getline(std::getline(isk, key, '='), val)) {
-          req_uri_params[url_decode(key)] = url_decode(val);
-        }
-      }
-    }
-
-    bool keep_alive = minor_version == 1;
-    bool has_content_length = false;
-    size_t content_length = 0;
-    for (size_t n = 0; n < num_headers; n++) {
-      auto key = std::string(headers[n].name, headers[n].name_len);
-      auto val = std::string(headers[n].value, headers[n].value_len);
-      camelize(key);
-      if (key == "Content-Length") {
-        content_length = std::stoi(val);
-        has_content_length = true;
-      } else if (key == "Connection") {
-        for (auto& c : val) c = (char) std::tolower(c);
-        if (val == "keep-alive")
-          keep_alive = true;
-        else if (val == "close")
-          keep_alive = false;
-      }
-      req_headers.emplace_back(std::move(key), std::move(val));
-    }
-
-    if (has_content_length && buflen - pret < content_length) {
-      auto rest = content_length - (buflen - pret);
-      buflen = 0;
-      while (rest > 0) {
-        while ((rret = recv(s, buf + buflen, (int) (sizeof(buf) - buflen), MSG_NOSIGNAL)) == -1 && errno == EINTR);
-        if (rret <= 0) {
-          closesocket(s);
-          return false;
-        }
-        req_body.append(buf, rret);
-        rest -= rret;
-      }
-    }
-
-    request req(
-        req_method,
-        req_raw_path,
-        req_path,
-        std::move(req_uri_params),
-        std::move(req_headers),
-        std::move(req_body));
-
-    if (!match(req_method, req_path, [&](const func_t& fn, const std::vector<std::string>& args) {
+    auto req = std::move(*read_result.req);
+    auto keep_alive = read_result.keep_alive;
+    if (!match(req.method, req.uri, [&](const func_t& fn, const std::vector<std::string>& args) {
       req.args = args;
       int code = 500;
       try {
         code = fn.handle(s, req, keep_alive);
 #ifndef CLASK_DISABLE_LOGS
-        CLASK_LOG(clask::log_level::INFO) << remote << " " << code << " " << req_method << " " << req_path;
+        CLASK_LOG(clask::log_level::INFO) << remote << " " << code << " " << req.method << " " << req.uri;
 #endif
       } catch (std::exception&) {
 #ifndef CLASK_DISABLE_LOGS
-        CLASK_LOG(clask::log_level::WARN) << remote << " " << code << " " << req_method << " " << req_path;
+        CLASK_LOG(clask::log_level::WARN) << remote << " " << code << " " << req.method << " " << req.uri;
 #endif
         keep_alive = false;
         send_text_response(code, "Internal Server Error", "Internal Server Error", keep_alive);
       }
     })) {
 #ifndef CLASK_DISABLE_LOGS
-      CLASK_LOG(clask::log_level::WARN) << remote << " " << 404 << " " << req_method << " " << req_path;
+      CLASK_LOG(clask::log_level::WARN) << remote << " " << 404 << " " << req.method << " " << req.uri;
 #endif
       send_text_response(404, "Not Found", "Not Found", keep_alive);
     }
