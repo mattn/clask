@@ -223,6 +223,30 @@ void test_clask_parse_route_method() {
   }
 }
 
+void test_clask_parse_path_segment() {
+  {
+    auto segment = clask::parse_path_segment("/users/:id", 0);
+    _ok(segment.value == "users", R"(segment.value == "users")");
+    _ok(segment.next_offset == 6, R"(segment.next_offset == 6)");
+    _ok(segment.placeholder == false, R"(segment.placeholder == false)");
+    _ok(segment.has_more == true, R"(segment.has_more == true)");
+  }
+  {
+    auto segment = clask::parse_path_segment("/:id", 0);
+    _ok(segment.value == "id", R"(segment.value == "id")");
+    _ok(segment.next_offset == 4, R"(segment.next_offset == 4)");
+    _ok(segment.placeholder == true, R"(segment.placeholder == true)");
+    _ok(segment.has_more == false, R"(segment.has_more == false)");
+  }
+  {
+    auto segment = clask::parse_path_segment("/users/:id", 6);
+    _ok(segment.value == "id", R"(segment.value == "id")");
+    _ok(segment.next_offset == 10, R"(segment.next_offset == 10)");
+    _ok(segment.placeholder == true, R"(segment.placeholder == true)");
+    _ok(segment.has_more == false, R"(segment.has_more == false)");
+  }
+}
+
 void test_clask_server_runtime_helpers() {
   _ok(clask::resolve_worker_count(7) == 7, R"(clask::resolve_worker_count(7) == 7)");
   _ok(clask::resolve_accept_queue_limit(123, 7) == 123, R"(clask::resolve_accept_queue_limit(123, 7) == 123)");
@@ -299,6 +323,7 @@ int main() {
   subtest("test_clask_post_route_match", test_clask_post_route_match);
   subtest("test_clask_parse_listen_address", test_clask_parse_listen_address);
   subtest("test_clask_parse_route_method", test_clask_parse_route_method);
+  subtest("test_clask_parse_path_segment", test_clask_parse_path_segment);
   subtest("test_clask_server_runtime_helpers", test_clask_server_runtime_helpers);
   subtest("test_clask_fluent_server_setup", test_clask_fluent_server_setup);
   subtest("test_clask_static_path_resolution", test_clask_static_path_resolution);

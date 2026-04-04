@@ -1453,8 +1453,8 @@ private:
   unsigned int worker_count_;
   size_t accept_queue_limit_;
   int socket_timeout_ms_;
-  node* route_tree(route_method);
-  const node* route_tree(route_method) const;
+  node& route_tree(route_method);
+  const node& route_tree(route_method) const;
   template <typename Functor>
   void register_route(route_method, const std::string&, Functor&&);
   void parse_tree(node&, const std::string&, const func_t&);
@@ -1516,24 +1516,18 @@ inline server_t&& server_t::socket_timeout(int v) && {
   return std::move(*this);
 }
 
-inline node* server_t::route_tree(route_method method) {
+inline node& server_t::route_tree(route_method method) {
   if (method == route_method::get) {
-    return &get_routes_;
+    return get_routes_;
   }
-  if (method == route_method::post) {
-    return &post_routes_;
-  }
-  return nullptr;
+  return post_routes_;
 }
 
-inline const node* server_t::route_tree(route_method method) const {
+inline const node& server_t::route_tree(route_method method) const {
   if (method == route_method::get) {
-    return &get_routes_;
+    return get_routes_;
   }
-  if (method == route_method::post) {
-    return &post_routes_;
-  }
-  return nullptr;
+  return post_routes_;
 }
 
 inline void server_t::parse_tree(node& n, const std::string& s, const func_t& fn) {
@@ -1578,7 +1572,7 @@ inline void server_t::parse_tree(node& n, const std::string& s, const func_t& fn
 }
 
 inline bool server_t::match(route_method method, const std::string& s, const std::function<void(const func_t& fn, const std::vector<std::string>&)>& fn) const {
-  const node* n = route_tree(method);
+  const node* n = &route_tree(method);
   std::vector<std::string> args;
   size_t offset = 0;
   while (offset < s.size()) {
@@ -1657,7 +1651,7 @@ inline void server_t::register_route(
     Functor&& assign_functor) {
   func_t func{};
   assign_functor(func);
-  parse_tree(*route_tree(method), path, func);
+  parse_tree(route_tree(method), path, func);
 }
 
 #define CLASK_DEFINE_REQUEST(name) \
