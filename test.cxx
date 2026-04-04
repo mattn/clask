@@ -144,6 +144,11 @@ void test_clask_request_uri_param() {
       .path = "/foo/ぼえ～",
       .args = { "ぼえ～" },
     },
+    {
+      .result = true,
+      .path = "/foo/hello%20world",
+      .args = { "hello world" },
+    },
   };
 
   auto s = clask::server();
@@ -332,6 +337,12 @@ void test_clask_static_path_resolution() {
     _ok(result.matched == true, R"(result.matched == true)");
     _ok(result.forbidden == false, R"(result.forbidden == false)");
     _ok(result.path == "./public/dir/", R"(result.path == "./public/dir/")");
+  }
+  {
+    auto result = clask::resolve_static_path("/static/hello%20world.txt", "/static/", "./public");
+    _ok(result.matched == true, R"(result.matched == true)");
+    _ok(result.forbidden == false, R"(result.forbidden == false)");
+    _ok(result.path == "./public/hello world.txt", R"(result.path == "./public/hello world.txt")");
   }
 }
 

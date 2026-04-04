@@ -1584,7 +1584,7 @@ inline bool server_t::match(route_method method, const std::string& s, const std
         n = &vv;
         found = true;
         break;
-      } else if (vv.name.empty() || vv.name == segment.value) {
+      } else if (vv.name == segment.value || (vv.name.empty() && segment.value.empty())) {
         n = &vv;
         found = true;
         break;
