@@ -1579,6 +1579,13 @@ inline bool server_t::match(route_method method, const std::string& s, const std
   std::vector<std::string> prefix_args;
   size_t offset = 0;
   while (offset < s.size()) {
+    for (const auto& vv : n->children) {
+      if (vv.name.empty() && vv.fn.prefix_match) {
+        prefix_fn = &vv.fn;
+        prefix_args = args;
+        break;
+      }
+    }
     auto segment = parse_path_segment(s, offset);
     bool found = false;
     for (const auto& vv : n->children) {
@@ -1596,10 +1603,6 @@ inline bool server_t::match(route_method method, const std::string& s, const std
     if (!found)
       break;
     offset = segment.next_offset;
-    if (n->fn.prefix_match) {
-      prefix_fn = &n->fn;
-      prefix_args = args;
-    }
     if (offset >= s.size()) {
       fn(n->fn, args);
       return true;
