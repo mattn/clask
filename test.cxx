@@ -190,6 +190,24 @@ void test_clask_server_runtime_helpers() {
       R"(clask::resolve_accept_queue_limit(0, 7) == 7 * clask::accept_queue_factor)");
 }
 
+void test_clask_fluent_server_setup() {
+  auto s = clask::server()
+      .worker_count(8)
+      .accept_queue_limit(123)
+      .socket_timeout(4567);
+  s.GET("/chain/:name", [](clask::request& req) -> std::string {
+    return req.args[0];
+  });
+
+  std::vector<std::string> req_args;
+  auto result = s.test_match("GET", "/chain/fluent", [&](const clask::func_t& /*fn*/, const std::vector<std::string>& args) {
+    req_args = args;
+  });
+  _ok(result == true, R"(result == true)");
+  _ok(req_args.size() == 1, R"(req_args.size() == 1)");
+  _ok(req_args[0] == "fluent", R"(req_args[0] == "fluent")");
+}
+
 int main() {
   subtest("test_clask_params", test_clask_params);
   subtest("test_clask_request_parse_multipart1", test_clask_request_parse_multipart1);
@@ -200,5 +218,6 @@ int main() {
   subtest("test_clask_request_uri_param", test_clask_request_uri_param);
   subtest("test_clask_parse_listen_address", test_clask_parse_listen_address);
   subtest("test_clask_server_runtime_helpers", test_clask_server_runtime_helpers);
+  subtest("test_clask_fluent_server_setup", test_clask_fluent_server_setup);
   return done_testing();
 }
