@@ -160,6 +160,36 @@ void test_clask_request_uri_param() {
   }
 }
 
+void test_clask_parse_listen_address() {
+  {
+    auto [host, port] = clask::parse_listen_address("127.0.0.1:8080");
+    _ok(host == "127.0.0.1", R"(host == "127.0.0.1")");
+    _ok(port == 8080, R"(port == 8080)");
+  }
+  {
+    auto [host, port] = clask::parse_listen_address(":9000");
+    _ok(host == "", R"(host == "")");
+    _ok(port == 9000, R"(port == 9000)");
+  }
+  {
+    auto thrown = false;
+    try {
+      (void) clask::parse_listen_address("127.0.0.1");
+    } catch (const std::runtime_error&) {
+      thrown = true;
+    }
+    _ok(thrown == true, R"(thrown == true)");
+  }
+}
+
+void test_clask_server_runtime_helpers() {
+  _ok(clask::resolve_worker_count(7) == 7, R"(clask::resolve_worker_count(7) == 7)");
+  _ok(clask::resolve_accept_queue_limit(123, 7) == 123, R"(clask::resolve_accept_queue_limit(123, 7) == 123)");
+  _ok(
+      clask::resolve_accept_queue_limit(0, 7) == 7 * clask::accept_queue_factor,
+      R"(clask::resolve_accept_queue_limit(0, 7) == 7 * clask::accept_queue_factor)");
+}
+
 int main() {
   subtest("test_clask_params", test_clask_params);
   subtest("test_clask_request_parse_multipart1", test_clask_request_parse_multipart1);
@@ -168,5 +198,7 @@ int main() {
   subtest("test_clask_request_parse_multipart4", test_clask_request_parse_multipart4);
   subtest("test_clask_to_wstring", test_clask_to_wstring);
   subtest("test_clask_request_uri_param", test_clask_request_uri_param);
+  subtest("test_clask_parse_listen_address", test_clask_parse_listen_address);
+  subtest("test_clask_server_runtime_helpers", test_clask_server_runtime_helpers);
   return done_testing();
 }
