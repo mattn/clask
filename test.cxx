@@ -21,6 +21,10 @@ void test_clask_params() {
   _ok(result.size() == 2, R"(result.size() == 2)");
   _ok(result["foo"] == "bar", R"(result["foo"] == "bar")");
   _ok(result["bar"] == "baz", R"(result["bar"] == "baz")");
+
+  result = clask::params("hello%20world=good%2Fday");
+  _ok(result.size() == 1, R"(result.size() == 1)");
+  _ok(result["hello world"] == "good/day", R"(result["hello world"] == "good/day")");
 }
 
 void test_clask_request_parse_multipart1() {
