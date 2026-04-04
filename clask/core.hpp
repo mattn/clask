@@ -915,6 +915,16 @@ public:
   }
 };
 
+inline void write_plain_text_response(
+    response_writer& resp,
+    int code,
+    const std::string& body) {
+  resp.clear_header();
+  resp.code = code;
+  resp.set_header("content-type", "text/plain");
+  resp.write(body);
+}
+
 inline std::unordered_map<std::string, std::string> params(const std::string& s) {
   std::unordered_map<std::string, std::string> ret;
   std::istringstream iss(s);
@@ -1684,10 +1694,7 @@ inline void serve_file(response_writer& resp, request& req, const std::string& p
 
   std::ifstream is(fspath, std::ios::in | std::ios::binary);
   if (is.fail()) {
-    resp.clear_header();
-    resp.code = 404;
-    resp.set_header("content-type", "text/plain");
-    resp.write("Not Found");
+    write_plain_text_response(resp, 404, "Not Found");
     return;
   }
 
@@ -1708,10 +1715,7 @@ inline void serve_file(response_writer& resp, request& req, const std::string& p
       std::istringstream ss(h.second);
       ss >> std::get_time(&file_gmt, "%a, %d %B %Y %H:%M:%S");
       if (!ss.fail() && std::mktime(&file_gmt) <= std::mktime(gmt)) {
-        resp.clear_header();
-        resp.code = 304;
-        resp.set_header("content-type", "text/plain");
-        resp.write("Not Modified");
+        write_plain_text_response(resp, 304, "Not Modified");
         return;
       }
       break;
