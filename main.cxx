@@ -2,10 +2,10 @@
 #include <clask/core.hpp>
 
 int main() {
-  auto s = clask::server()
-    .worker_count(32)
-    .accept_queue_limit(4096)
-    .socket_timeout(3000);
+  auto s = clask::server();
+  s.worker_count(32);
+  s.accept_queue_limit(4096);
+  s.socket_timeout(3000);
   s.GET("/", [](clask::request&) {
     return "OK!";
   });
