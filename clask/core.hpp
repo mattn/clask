@@ -114,6 +114,13 @@ struct static_path_resolution {
   std::string path;
 };
 
+struct path_segment {
+  std::string value;
+  size_t next_offset;
+  bool placeholder;
+  bool has_more;
+};
+
 inline void drain_completed_connections(server_runtime_state& runtime);
 inline void accept_ready_connection(
     int server_fd,
@@ -298,6 +305,27 @@ inline listen_address make_listen_address(int port) {
 
 inline bool contains_parent_reference(const std::string& path) {
   return path.find("..") != std::string::npos;
+}
+
+inline path_segment parse_path_segment(const std::string& path, size_t offset) {
+  auto pos = path.find('/', offset + 1);
+  auto has_more = pos != std::string::npos;
+  if (!has_more) {
+    pos = path.size();
+  }
+
+  auto raw = path.substr(offset + 1, pos - offset - 1);
+  auto placeholder = !raw.empty() && raw[0] == ':';
+  if (placeholder) {
+    raw = raw.substr(1);
+  }
+
+  return path_segment{
+    .value = std::move(raw),
+    .next_offset = pos,
+    .placeholder = placeholder,
+    .has_more = has_more,
+  };
 }
 
 inline void initialize_network_runtime() {
@@ -1479,13 +1507,11 @@ inline const node* server_t::route_tree(const std::string& method) const {
 }
 
 inline void server_t::parse_tree(node& n, const std::string& s, const func_t& fn) {
-  auto pos = s.find('/', 1);
-  auto placeholder = s[1] == ':';
-  if (pos == std::string::npos) {
+  auto segment = parse_path_segment(s, 0);
+  if (!segment.has_more) {
     bool found = false;
-    auto sub = s.substr(placeholder ? 2 : 1);
     for (auto& vv : n.children) {
-      if (vv.name == sub) {
+      if (vv.name == segment.value) {
         found = true;
         break;
       }
@@ -1493,32 +1519,30 @@ inline void server_t::parse_tree(node& n, const std::string& s, const func_t& fn
     if (!found) {
       node nn =  {
         .children = {},
-        .name = std::move(sub),
+        .name = std::move(segment.value),
         .fn = fn,
-        .placeholder = placeholder,
+        .placeholder = segment.placeholder,
       };
       n.children.emplace_back(nn);
     }
     return;
   }
-  auto sub = s.substr(1, pos - 1);
-  if (placeholder) sub = sub.substr(1);
   bool found = false;
   for (auto& vv : n.children) {
-    if (vv.name == sub) {
+    if (vv.name == segment.value) {
       found = true;
-      parse_tree(vv, s.substr(pos), fn);
+      parse_tree(vv, s.substr(segment.next_offset), fn);
       break;
     }
   }
   if (!found) {
     node nn = {
       .children = {},
-      .name = std::move(sub),
+      .name = std::move(segment.value),
       .fn = {},
-      .placeholder = placeholder,
+      .placeholder = segment.placeholder,
     };
-    parse_tree(nn, s.substr(pos), fn);
+    parse_tree(nn, s.substr(segment.next_offset), fn);
     n.children.emplace_back(std::move(nn));
   }
 }
@@ -1531,23 +1555,15 @@ inline bool server_t::match(const std::string& method, const std::string& s, con
   std::vector<std::string> args;
   size_t offset = 0;
   while (offset < s.size()) {
-    auto pos = s.find('/', offset + 1);
-
-    std::string sub;
-    if (pos == std::string::npos) {
-      sub = s.substr(offset + 1);
-      pos = s.size();
-    } else {
-      sub = s.substr(offset + 1, pos - offset - 1);
-    }
+    auto segment = parse_path_segment(s, offset);
     bool found = false;
     for (const auto& vv : n->children) {
       if (vv.placeholder) {
-        args.emplace_back(url_decode(sub));
+        args.emplace_back(url_decode(segment.value));
         n = &vv;
         found = true;
         break;
-      } else if (vv.name.empty() || vv.name == sub) {
+      } else if (vv.name.empty() || vv.name == segment.value) {
         n = &vv;
         found = true;
         break;
@@ -1555,7 +1571,7 @@ inline bool server_t::match(const std::string& method, const std::string& s, con
     }
     if (!found)
       break;
-    offset = pos;
+    offset = segment.next_offset;
     if (offset >= s.size() || n->children.empty()) {
       fn(n->fn, args);
       return true;
