@@ -42,7 +42,7 @@ auto s = clask::server()
 - `accept_queue_limit(n)` caps queued accepted sockets before returning `503 Service Unavailable`.
 - `socket_timeout(ms)` sets socket send/receive timeout in milliseconds.
 
-The current worker-pool runtime closes each connection after one request. In other words, HTTP keep-alive is intentionally disabled for pooled workers to avoid one idle connection occupying one worker thread.
+The current worker-pool runtime supports HTTP keep-alive by routing only readable sockets to workers. Idle keep-alive connections stay in the event loop instead of occupying one worker thread each.
 
 ## TODO
 
