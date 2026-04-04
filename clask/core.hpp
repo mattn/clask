@@ -171,6 +171,34 @@ inline socket_wait_result wait_socket_events(
   return result;
 }
 
+inline void send_service_unavailable_response(int s) {
+  static const std::string busy_response =
+      "HTTP/1.1 503 Service Unavailable\r\n"
+      "Content-Type: text/plain\r\n"
+      "Connection: Close\r\n"
+      "Content-Length: 19\r\n\r\n"
+      "Service Unavailable";
+  send(s, busy_response.data(), (int) busy_response.size(), MSG_NOSIGNAL);
+}
+
+inline bool accept_connection(
+    int server_fd,
+    connection_state& conn) {
+  struct sockaddr_in client_address{};
+  socklen_t client_addrlen = sizeof(client_address);
+  auto s = (int) accept(server_fd, (struct sockaddr *)&client_address, &client_addrlen);
+  if (s < 0) {
+    return false;
+  }
+  char addr_buf[INET_ADDRSTRLEN];
+  inet_ntop(AF_INET, &client_address.sin_addr, addr_buf, INET_ADDRSTRLEN);
+  conn = connection_state {
+    .fd = s,
+    .remote = std::string(addr_buf),
+  };
+  return true;
+}
+
 typedef enum class _log_level {ERR, WARN, INFO, DEBUG} log_level;
 
 class logger {
@@ -1388,35 +1416,20 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
 
     if (wait_result.server_readable) {
       if (tracked_connections.load() >= accept_queue_limit) {
-        struct sockaddr_in client_address{};
-        socklen_t client_addrlen = sizeof(client_address);
-        auto s = (int) accept(server_fd, (struct sockaddr *)&client_address, &client_addrlen);
-        if (s >= 0) {
-          static const std::string busy_response =
-              "HTTP/1.1 503 Service Unavailable\r\n"
-              "Content-Type: text/plain\r\n"
-              "Connection: Close\r\n"
-              "Content-Length: 19\r\n\r\n"
-              "Service Unavailable";
-          send(s, busy_response.data(), (int) busy_response.size(), MSG_NOSIGNAL);
-          closesocket(s);
+        connection_state conn{};
+        if (accept_connection(server_fd, conn)) {
+          send_service_unavailable_response(conn.fd);
+          closesocket(conn.fd);
         }
       } else {
-        struct sockaddr_in client_address{};
-        socklen_t client_addrlen = sizeof(client_address);
-        auto s = (int) accept(server_fd, (struct sockaddr *)&client_address, &client_addrlen);
-        if (s < 0) {
+        connection_state conn{};
+        if (!accept_connection(server_fd, conn)) {
           throw std::runtime_error("accept");
         }
-        char addr_buf[INET_ADDRSTRLEN];
-        inet_ntop(AF_INET, &client_address.sin_addr, addr_buf, INET_ADDRSTRLEN);
         tracked_connections++;
         {
           std::lock_guard<std::mutex> lk(ready_queue_mu);
-          ready_queue.emplace_back(connection_state{
-            .fd = s,
-            .remote = std::string(addr_buf),
-          });
+          ready_queue.emplace_back(std::move(conn));
         }
         ready_queue_cv.notify_one();
       }
