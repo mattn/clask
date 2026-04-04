@@ -247,6 +247,10 @@ void test_clask_parse_route_method() {
     auto method = clask::parse_route_method("DELETE");
     _ok(method.has_value() == false, R"(method.has_value() == false)");
   }
+  {
+    auto method = clask::parse_route_method("get");
+    _ok(method.has_value() == false, R"(method.has_value() == false)");
+  }
 }
 
 void test_clask_parse_path_segment() {
@@ -307,6 +311,12 @@ void test_clask_request_read_result_helpers() {
     _ok(result.req.has_value() == true, R"(result.req.has_value() == true)");
     _ok(result.req->uri == "/x", R"(result.req->uri == "/x")");
   }
+}
+
+void test_clask_parent_reference_guard() {
+  _ok(clask::contains_parent_reference("../secret") == true, R"(clask::contains_parent_reference("../secret") == true)");
+  _ok(clask::contains_parent_reference("safe/path") == false, R"(clask::contains_parent_reference("safe/path") == false)");
+  _ok(clask::contains_parent_reference("..") == true, R"(clask::contains_parent_reference("..") == true)");
 }
 
 void test_clask_server_runtime_helpers() {
@@ -419,6 +429,7 @@ int main() {
   subtest("test_clask_parse_route_method", test_clask_parse_route_method);
   subtest("test_clask_parse_path_segment", test_clask_parse_path_segment);
   subtest("test_clask_request_read_result_helpers", test_clask_request_read_result_helpers);
+  subtest("test_clask_parent_reference_guard", test_clask_parent_reference_guard);
   subtest("test_clask_server_runtime_helpers", test_clask_server_runtime_helpers);
   subtest("test_clask_fluent_server_setup", test_clask_fluent_server_setup);
   subtest("test_clask_static_path_resolution", test_clask_static_path_resolution);
