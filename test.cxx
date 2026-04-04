@@ -177,14 +177,14 @@ void test_clask_post_route_match() {
 
 void test_clask_parse_listen_address() {
   {
-    auto [host, port] = clask::parse_listen_address("127.0.0.1:8080");
-    _ok(host == "127.0.0.1", R"(host == "127.0.0.1")");
-    _ok(port == 8080, R"(port == 8080)");
+    auto addr = clask::parse_listen_address("127.0.0.1:8080");
+    _ok(addr.host == "127.0.0.1", R"(addr.host == "127.0.0.1")");
+    _ok(addr.port == 8080, R"(addr.port == 8080)");
   }
   {
-    auto [host, port] = clask::parse_listen_address(":9000");
-    _ok(host == "", R"(host == "")");
-    _ok(port == 9000, R"(port == 9000)");
+    auto addr = clask::parse_listen_address(":9000");
+    _ok(addr.host == "", R"(addr.host == "")");
+    _ok(addr.port == 9000, R"(addr.port == 9000)");
   }
   {
     auto thrown = false;
@@ -194,6 +194,11 @@ void test_clask_parse_listen_address() {
       thrown = true;
     }
     _ok(thrown == true, R"(thrown == true)");
+  }
+  {
+    auto addr = clask::make_listen_address(8080);
+    _ok(addr.host == "", R"(addr.host == "")");
+    _ok(addr.port == 8080, R"(addr.port == 8080)");
   }
 }
 

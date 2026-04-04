@@ -103,6 +103,11 @@ struct server_runtime_config {
   int socket_timeout_ms;
 };
 
+struct listen_address {
+  std::string host;
+  int port;
+};
+
 struct static_path_resolution {
   bool matched;
   bool forbidden;
@@ -273,12 +278,22 @@ inline int create_listening_socket(const std::string& host, int port) {
   return server_fd;
 }
 
-inline std::pair<std::string, int> parse_listen_address(const std::string& addr) {
+inline listen_address parse_listen_address(const std::string& addr) {
   auto pos = addr.find_last_of(':');
   if (pos == std::string::npos) {
     throw std::runtime_error("invalid host:port");
   }
-  return std::make_pair(addr.substr(0, pos), std::stoi(addr.substr(pos + 1)));
+  return listen_address{
+    .host = addr.substr(0, pos),
+    .port = std::stoi(addr.substr(pos + 1)),
+  };
+}
+
+inline listen_address make_listen_address(int port) {
+  return listen_address{
+    .host = "",
+    .port = port,
+  };
 }
 
 inline bool contains_parent_reference(const std::string& path) {
@@ -1731,12 +1746,13 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
 }
 
 inline void server_t::run(const std::string& addr) {
-  auto [host, port] = parse_listen_address(addr);
-  _run(host, port);
+  auto listen_addr = parse_listen_address(addr);
+  _run(listen_addr.host, listen_addr.port);
 }
 
 inline void server_t::run(int port = 8080) {
-  _run("", port);
+  auto listen_addr = make_listen_address(port);
+  _run(listen_addr.host, listen_addr.port);
 }
 
 inline server_t server() { return server_t{}; }
