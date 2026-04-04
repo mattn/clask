@@ -103,6 +103,12 @@ struct server_runtime_config {
   int socket_timeout_ms;
 };
 
+struct static_path_resolution {
+  bool matched;
+  bool forbidden;
+  std::string path;
+};
+
 inline void drain_completed_connections(server_runtime_state& runtime);
 inline void accept_ready_connection(
     int server_fd,
@@ -695,6 +701,43 @@ inline std::string part::header_value(const std::string& name) {
     if (h.first == key) return h.second;
   }
   return "";
+}
+
+inline static_path_resolution resolve_static_path(
+    const std::string& request_uri,
+    const std::string& mount_path,
+    const std::string& directory) {
+  if (contains_parent_reference(request_uri)) {
+    return static_path_resolution{
+      .matched = true,
+      .forbidden = true,
+      .path = "",
+    };
+  }
+
+  auto res = std::mismatch(request_uri.begin(), request_uri.end(), mount_path.begin());
+  if (res.first != request_uri.begin() + mount_path.size()) {
+    return static_path_resolution{
+      .matched = false,
+      .forbidden = false,
+      .path = "",
+    };
+  }
+
+  auto relative_path = url_decode(request_uri.substr(mount_path.size()));
+  if (contains_parent_reference(relative_path)) {
+    return static_path_resolution{
+      .matched = true,
+      .forbidden = true,
+      .path = "",
+    };
+  }
+
+  return static_path_resolution{
+    .matched = true,
+    .forbidden = false,
+    .path = directory + "/" + relative_path,
+  };
 }
 
 static std::unordered_map<int, std::string> status_codes = {
@@ -1616,31 +1659,21 @@ inline void serve_file(response_writer& resp, request& req, const std::string& p
 inline void server_t::static_dir(const std::string& path, const std::string& dir, bool listing) {
   func_t func{};
   func.f_writer = [path, dir, listing](response_writer& resp, request& req) {
-    auto req_path = req.uri;
-    if (contains_parent_reference(req_path)) {
+    auto resolved = resolve_static_path(req.uri, path, dir);
+    if (resolved.forbidden) {
       resp.code = 403;
       resp.set_header("content-type", "text/plain");
       resp.write("Forbidden");
       return;
     }
-
-    auto res = std::mismatch(req_path.begin(), req_path.end(), path.begin());
-    if (res.first != req_path.begin() + path.size()) {
+    if (!resolved.matched) {
       resp.code = 404;
       resp.set_header("content-type", "text/plain");
       resp.write("Not Found");
       return;
     }
 
-    req_path = url_decode(req_path.substr(path.size()));
-    if (contains_parent_reference(req_path)) {
-      resp.code = 403;
-      resp.set_header("content-type", "text/plain");
-      resp.write("Forbidden");
-      return;
-    }
-
-    req_path = dir + "/" + req_path;
+    auto req_path = std::move(resolved.path);
     if (!req_path.empty() && req_path[req_path.size() - 1] == '/') {
       if (listing) {
         serve_dir(resp, req, req_path);

@@ -222,6 +222,25 @@ void test_clask_fluent_server_setup() {
   _ok(req_args[0] == "fluent", R"(req_args[0] == "fluent")");
 }
 
+void test_clask_static_path_resolution() {
+  {
+    auto result = clask::resolve_static_path("/static/hello.txt", "/static/", "./public");
+    _ok(result.matched == true, R"(result.matched == true)");
+    _ok(result.forbidden == false, R"(result.forbidden == false)");
+    _ok(result.path == "./public/hello.txt", R"(result.path == "./public/hello.txt")");
+  }
+  {
+    auto result = clask::resolve_static_path("/other/hello.txt", "/static/", "./public");
+    _ok(result.matched == false, R"(result.matched == false)");
+    _ok(result.forbidden == false, R"(result.forbidden == false)");
+  }
+  {
+    auto result = clask::resolve_static_path("/static/../secret.txt", "/static/", "./public");
+    _ok(result.matched == true, R"(result.matched == true)");
+    _ok(result.forbidden == true, R"(result.forbidden == true)");
+  }
+}
+
 int main() {
   subtest("test_clask_params", test_clask_params);
   subtest("test_clask_request_parse_multipart1", test_clask_request_parse_multipart1);
@@ -233,5 +252,6 @@ int main() {
   subtest("test_clask_parse_listen_address", test_clask_parse_listen_address);
   subtest("test_clask_server_runtime_helpers", test_clask_server_runtime_helpers);
   subtest("test_clask_fluent_server_setup", test_clask_fluent_server_setup);
+  subtest("test_clask_static_path_resolution", test_clask_static_path_resolution);
   return done_testing();
 }
