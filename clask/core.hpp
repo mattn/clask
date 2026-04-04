@@ -97,6 +97,12 @@ struct server_runtime_state {
   std::atomic<size_t> tracked_connections{0};
 };
 
+struct server_runtime_config {
+  unsigned int worker_count;
+  size_t accept_queue_limit;
+  int socket_timeout_ms;
+};
+
 inline void drain_completed_connections(server_runtime_state& runtime);
 inline void accept_ready_connection(
     int server_fd,
@@ -296,6 +302,20 @@ inline size_t resolve_accept_queue_limit(
     return configured_accept_queue_limit;
   }
   return worker_count * accept_queue_factor;
+}
+
+inline server_runtime_config resolve_server_runtime_config(
+    unsigned int configured_worker_count,
+    size_t configured_accept_queue_limit,
+    int socket_timeout_ms) {
+  auto worker_count = resolve_worker_count(configured_worker_count);
+  return server_runtime_config{
+    .worker_count = worker_count,
+    .accept_queue_limit = resolve_accept_queue_limit(
+        configured_accept_queue_limit,
+        worker_count),
+    .socket_timeout_ms = socket_timeout_ms,
+  };
 }
 
 template <typename HandleConnectionFn>
@@ -1315,7 +1335,7 @@ private:
   int socket_timeout_ms_;
   void parse_tree(node&, const std::string&, const func_t&);
   bool match(const std::string&, const std::string&, const std::function<void(const func_t& fn, const std::vector<std::string>&)>&) const;
-  bool handle_connection_socket(int, const std::string&) const;
+  bool handle_connection_socket(int, const std::string&, const server_runtime_config&) const;
   void _run(const std::string&, int);
 
 public:
@@ -1455,11 +1475,14 @@ inline bool server_t::match(const std::string& method, const std::string& s, con
   return false;
 }
 
-inline bool server_t::handle_connection_socket(int s, const std::string& remote) const {
+inline bool server_t::handle_connection_socket(
+    int s,
+    const std::string& remote,
+    const server_runtime_config& config) const {
   return handle_connection_request(
       s,
       remote,
-      socket_timeout_ms_,
+      config.socket_timeout_ms,
       [&](const std::string& method, const std::string& path, const auto& fn) {
         return match(method, path, fn);
       });
@@ -1632,18 +1655,19 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
   prepare_handler_trees(treeGET, treePOST);
 
   auto server_fd = create_listening_socket(host, port);
-
+  auto config = resolve_server_runtime_config(
+      worker_count_,
+      accept_queue_limit_,
+      socket_timeout_ms_);
   server_runtime_state runtime;
-  const auto worker_count = resolve_worker_count(worker_count_);
-  const auto accept_queue_limit = resolve_accept_queue_limit(accept_queue_limit_, worker_count);
 
   run_server_event_loop(
       server_fd,
-      worker_count,
-      accept_queue_limit,
+      config.worker_count,
+      config.accept_queue_limit,
       runtime,
       [&](int s, const std::string& remote) {
-        return handle_connection_socket(s, remote);
+        return handle_connection_socket(s, remote, config);
       });
 }
 

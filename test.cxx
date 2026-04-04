@@ -188,6 +188,20 @@ void test_clask_server_runtime_helpers() {
   _ok(
       clask::resolve_accept_queue_limit(0, 7) == 7 * clask::accept_queue_factor,
       R"(clask::resolve_accept_queue_limit(0, 7) == 7 * clask::accept_queue_factor)");
+  {
+    auto config = clask::resolve_server_runtime_config(7, 123, 4567);
+    _ok(config.worker_count == 7, R"(config.worker_count == 7)");
+    _ok(config.accept_queue_limit == 123, R"(config.accept_queue_limit == 123)");
+    _ok(config.socket_timeout_ms == 4567, R"(config.socket_timeout_ms == 4567)");
+  }
+  {
+    auto config = clask::resolve_server_runtime_config(7, 0, 5000);
+    _ok(config.worker_count == 7, R"(config.worker_count == 7)");
+    _ok(
+        config.accept_queue_limit == 7 * clask::accept_queue_factor,
+        R"(config.accept_queue_limit == 7 * clask::accept_queue_factor)");
+    _ok(config.socket_timeout_ms == 5000, R"(config.socket_timeout_ms == 5000)");
+  }
 }
 
 void test_clask_fluent_server_setup() {
