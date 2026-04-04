@@ -287,6 +287,28 @@ void test_clask_parse_path_segment() {
   }
 }
 
+void test_clask_request_read_result_helpers() {
+  {
+    auto result = clask::make_request_read_error(400, "Bad Request", "Invalid Request");
+    _ok(result.ok == false, R"(result.ok == false)");
+    _ok(result.keep_alive == false, R"(result.keep_alive == false)");
+    _ok(result.error_code == 400, R"(result.error_code == 400)");
+    _ok(std::string(result.error_reason) == "Bad Request", R"(std::string(result.error_reason) == "Bad Request")");
+    _ok(std::string(result.error_body) == "Invalid Request", R"(std::string(result.error_body) == "Invalid Request")");
+    _ok(result.req.has_value() == false, R"(result.req.has_value() == false)");
+  }
+  {
+    auto result = clask::make_request_read_success(
+        true,
+        clask::request("GET", "/x", "/x", {}, {}, ""));
+    _ok(result.ok == true, R"(result.ok == true)");
+    _ok(result.keep_alive == true, R"(result.keep_alive == true)");
+    _ok(result.error_code == 0, R"(result.error_code == 0)");
+    _ok(result.req.has_value() == true, R"(result.req.has_value() == true)");
+    _ok(result.req->uri == "/x", R"(result.req->uri == "/x")");
+  }
+}
+
 void test_clask_server_runtime_helpers() {
   _ok(clask::resolve_worker_count(7) == 7, R"(clask::resolve_worker_count(7) == 7)");
   _ok(clask::resolve_accept_queue_limit(123, 7) == 123, R"(clask::resolve_accept_queue_limit(123, 7) == 123)");
@@ -396,6 +418,7 @@ int main() {
   subtest("test_clask_parse_listen_address", test_clask_parse_listen_address);
   subtest("test_clask_parse_route_method", test_clask_parse_route_method);
   subtest("test_clask_parse_path_segment", test_clask_parse_path_segment);
+  subtest("test_clask_request_read_result_helpers", test_clask_request_read_result_helpers);
   subtest("test_clask_server_runtime_helpers", test_clask_server_runtime_helpers);
   subtest("test_clask_fluent_server_setup", test_clask_fluent_server_setup);
   subtest("test_clask_static_path_resolution", test_clask_static_path_resolution);
