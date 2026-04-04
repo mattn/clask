@@ -275,6 +275,10 @@ inline std::pair<std::string, int> parse_listen_address(const std::string& addr)
   return std::make_pair(addr.substr(0, pos), std::stoi(addr.substr(pos + 1)));
 }
 
+inline bool contains_parent_reference(const std::string& path) {
+  return path.find("..") != std::string::npos;
+}
+
 inline void initialize_network_runtime() {
 #ifdef _WIN32
   WSADATA wsa;
@@ -1613,7 +1617,7 @@ inline void server_t::static_dir(const std::string& path, const std::string& dir
   func_t func{};
   func.f_writer = [path, dir, listing](response_writer& resp, request& req) {
     auto req_path = req.uri;
-    if (req_path.find("..") != std::string::npos) {
+    if (contains_parent_reference(req_path)) {
       resp.code = 403;
       resp.set_header("content-type", "text/plain");
       resp.write("Forbidden");
@@ -1629,7 +1633,7 @@ inline void server_t::static_dir(const std::string& path, const std::string& dir
     }
 
     req_path = url_decode(req_path.substr(path.size()));
-    if (req_path.find("..") != std::string::npos) {
+    if (contains_parent_reference(req_path)) {
       resp.code = 403;
       resp.set_header("content-type", "text/plain");
       resp.write("Forbidden");
