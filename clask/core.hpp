@@ -1158,6 +1158,33 @@ struct request_read_result {
   std::optional<request> req;
 };
 
+inline request_read_result make_request_read_error(
+    int error_code,
+    const char* error_reason,
+    const char* error_body) {
+  return request_read_result{
+    .ok = false,
+    .keep_alive = false,
+    .error_code = error_code,
+    .error_reason = error_reason,
+    .error_body = error_body,
+    .req = std::nullopt,
+  };
+}
+
+inline request_read_result make_request_read_success(
+    bool keep_alive,
+    request req) {
+  return request_read_result{
+    .ok = true,
+    .keep_alive = keep_alive,
+    .error_code = 0,
+    .error_reason = "",
+    .error_body = "",
+    .req = std::move(req),
+  };
+}
+
 inline request_read_result read_request_from_socket(int s) {
   char buf[16384];
   const char *method, *path;
@@ -1169,14 +1196,7 @@ inline request_read_result read_request_from_socket(int s) {
   while (true) {
     while ((rret = recv(s, buf + buflen, (int) (sizeof(buf) - buflen), MSG_NOSIGNAL)) == -1 && errno == EINTR);
     if (rret <= 0) {
-      return request_read_result{
-        .ok = false,
-        .keep_alive = false,
-        .error_code = 0,
-        .error_reason = "",
-        .error_body = "",
-        .req = std::nullopt,
-      };
+      return make_request_read_error(0, "", "");
     }
 
     prevbuflen = buflen;
@@ -1189,24 +1209,10 @@ inline request_read_result read_request_from_socket(int s) {
       break;
     }
     if (pret == -1) {
-      return request_read_result{
-        .ok = false,
-        .keep_alive = false,
-        .error_code = 400,
-        .error_reason = "Bad Request",
-        .error_body = "Invalid Request",
-        .req = std::nullopt,
-      };
+      return make_request_read_error(400, "Bad Request", "Invalid Request");
     }
     if (buflen == sizeof(buf)) {
-      return request_read_result{
-        .ok = false,
-        .keep_alive = false,
-        .error_code = 413,
-        .error_reason = "Payload Too Large",
-        .error_body = "Request Too Large",
-        .req = std::nullopt,
-      };
+      return make_request_read_error(413, "Payload Too Large", "Request Too Large");
     }
   }
 
@@ -1256,34 +1262,22 @@ inline request_read_result read_request_from_socket(int s) {
     while (rest > 0) {
       while ((rret = recv(s, buf + buflen, (int) (sizeof(buf) - buflen), MSG_NOSIGNAL)) == -1 && errno == EINTR);
       if (rret <= 0) {
-        return request_read_result{
-          .ok = false,
-          .keep_alive = false,
-          .error_code = 0,
-          .error_reason = "",
-          .error_body = "",
-          .req = std::nullopt,
-        };
+        return make_request_read_error(0, "", "");
       }
       req_body.append(buf, rret);
       rest -= rret;
     }
   }
 
-  return request_read_result{
-    .ok = true,
-    .keep_alive = keep_alive,
-    .error_code = 0,
-    .error_reason = "",
-    .error_body = "",
-    .req = request(
+  return make_request_read_success(
+      keep_alive,
+      request(
         req_method,
         req_raw_path,
         req_path,
         std::move(req_uri_params),
         std::move(req_headers),
-        std::move(req_body)),
-  };
+        std::move(req_body)));
 }
 
 typedef std::function<void(response_writer&, request&)> functor_writer;
