@@ -46,6 +46,32 @@ int main() {
     };
   });
 
+  s.QUERY("/search", [&](clask::request& req) -> clask::response {
+    // RFC 10008: safe, idempotent query with the search term in the body.
+    auto term = req.body;
+    nlohmann::json data;
+    data["posts"] = {};
+    auto sql = "select id, text from bbs where text like '%' || ? || '%' order by created";
+    sqlite3_stmt *stmt = nullptr;
+    sqlite3_prepare(db, sql, -1, &stmt, nullptr);
+    sqlite3_bind_text(stmt, 1, term.c_str(), -1,
+      (sqlite3_destructor_type) SQLITE_TRANSIENT);
+    int n = 0;
+    while (SQLITE_DONE != sqlite3_step(stmt)) {
+      data["posts"][n]["id"] = (std::string) (char*) sqlite3_column_text(stmt, 0);
+      data["posts"][n]["text"] = (std::string) (char*) sqlite3_column_text(stmt, 1);
+      n++;
+    }
+    sqlite3_finalize(stmt);
+    return clask::response {
+      .code = 200,
+      .content = data.dump(),
+      .headers = {
+        { "Content-Type", "application/json" },
+      },
+    };
+  });
+
   s.POST("/post", [&](clask::request& req) -> clask::response {
     auto params = clask::params(req.body);
     auto q = params["text"];
