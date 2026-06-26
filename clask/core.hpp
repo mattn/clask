@@ -668,7 +668,8 @@ inline std::string url_encode(const std::string &value, bool escape_slash = true
   os.fill('0');
   os << std::hex;
   for (char c : value) {
-    if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
+    auto uc = static_cast<unsigned char>(c);
+    if (std::isalnum(uc) || c == '-' || c == '_' || c == '.' || c == '~') {
       os << c;
       continue;
     }

@@ -167,6 +167,12 @@ void test_clask_trim_string() {
   }
 }
 
+void test_clask_url_encode() {
+  _ok(clask::url_encode("hello world") == "hello%20world", "space is encoded");
+  _ok(clask::url_encode("/files/name", false) == "/files/name", R"(clask::url_encode("/files/name", false) == "/files/name")");
+  _ok(clask::url_encode("あ") == "%E3%81%82", "utf-8 bytes are encoded");
+}
+
 void test_clask_request_cookie_value() {
   {
     clask::request req(
@@ -647,6 +653,7 @@ int main() {
   subtest("test_clask_request_parse_multipart5", test_clask_request_parse_multipart5);
   subtest("test_clask_to_wstring", test_clask_to_wstring);
   subtest("test_clask_trim_string", test_clask_trim_string);
+  subtest("test_clask_url_encode", test_clask_url_encode);
   subtest("test_clask_request_cookie_value", test_clask_request_cookie_value);
   subtest("test_clask_request_uri_param", test_clask_request_uri_param);
   subtest("test_clask_post_route_match", test_clask_post_route_match);
