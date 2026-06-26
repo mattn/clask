@@ -776,8 +776,8 @@ inline static_path_resolution resolve_static_path(
     };
   }
 
-  auto res = std::mismatch(request_uri.begin(), request_uri.end(), mount_path.begin());
-  if (res.first != request_uri.begin() + mount_path.size()) {
+  if (request_uri.size() < mount_path.size()
+      || request_uri.compare(0, mount_path.size(), mount_path) != 0) {
     return static_path_resolution{
       .matched = false,
       .forbidden = false,
