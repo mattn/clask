@@ -283,6 +283,25 @@ void test_clask_root_route_match() {
   _ok(miss == false, R"(miss == false)");
 }
 
+void test_clask_literal_route_priority() {
+  auto s = clask::server();
+  s.GET("/:id", [](clask::request& req) -> std::string {
+    return req.args[0];
+  });
+  s.GET("/about", [](clask::request& /*req*/) -> std::string {
+    return "about";
+  });
+
+  auto matched_literal = false;
+  auto result = s.test_match("GET", "/about", [&](const clask::func_t& fn, const std::vector<std::string>& args) {
+    clask::request req("GET", "/about", "/about", {}, {}, "");
+    req.args = args;
+    matched_literal = fn.f_string(req) == "about";
+  });
+  _ok(result == true, R"(result == true)");
+  _ok(matched_literal == true, R"(matched_literal == true)");
+}
+
 void test_clask_static_dir_route_match() {
   auto s = clask::server();
   s.static_dir("/", "./public");
@@ -541,6 +560,7 @@ int main() {
   subtest("test_clask_post_route_match", test_clask_post_route_match);
   subtest("test_clask_query_route_match", test_clask_query_route_match);
   subtest("test_clask_root_route_match", test_clask_root_route_match);
+  subtest("test_clask_literal_route_priority", test_clask_literal_route_priority);
   subtest("test_clask_static_dir_route_match", test_clask_static_dir_route_match);
   subtest("test_clask_parse_listen_address", test_clask_parse_listen_address);
   subtest("test_clask_parse_route_method", test_clask_parse_route_method);
