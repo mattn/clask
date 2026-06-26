@@ -322,6 +322,25 @@ void test_clask_static_dir_route_match() {
   _ok(nested == true, R"(nested == true)");
 }
 
+void test_clask_non_root_static_dir_route_match() {
+  auto s = clask::server();
+  s.static_dir("/files", "./files");
+
+  auto root = s.test_match("GET", "/files", [&](const clask::func_t& /*fn*/, const std::vector<std::string>& args) {
+    _ok(args.empty() == true, R"(args.empty() == true)");
+  });
+  _ok(root == true, R"(root == true)");
+
+  auto nested = s.test_match("GET", "/files/readme.txt", [&](const clask::func_t& /*fn*/, const std::vector<std::string>& args) {
+    _ok(args.empty() == true, R"(args.empty() == true)");
+  });
+  _ok(nested == true, R"(nested == true)");
+
+  auto miss = s.test_match("GET", "/files-other/readme.txt", [&](const clask::func_t& /*fn*/, const std::vector<std::string>& /*args*/) {
+  });
+  _ok(miss == false, R"(miss == false)");
+}
+
 void test_clask_parse_listen_address() {
   {
     auto addr = clask::parse_listen_address("127.0.0.1:8080");
@@ -562,6 +581,7 @@ int main() {
   subtest("test_clask_root_route_match", test_clask_root_route_match);
   subtest("test_clask_literal_route_priority", test_clask_literal_route_priority);
   subtest("test_clask_static_dir_route_match", test_clask_static_dir_route_match);
+  subtest("test_clask_non_root_static_dir_route_match", test_clask_non_root_static_dir_route_match);
   subtest("test_clask_parse_listen_address", test_clask_parse_listen_address);
   subtest("test_clask_parse_route_method", test_clask_parse_route_method);
   subtest("test_clask_parse_path_segment", test_clask_parse_path_segment);
