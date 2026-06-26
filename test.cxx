@@ -154,6 +154,19 @@ void test_clask_to_wstring() {
   _ok(clask::to_wstring("あいうえお") == L"あいうえお", R"(clask::to_wstring("あいうえお") == L"あいうえお")");
 }
 
+void test_clask_trim_string() {
+  {
+    std::string value = "  hello \t";
+    clask::trim_string(value);
+    _ok(value == "hello", R"(value == "hello")");
+  }
+  {
+    std::string value = " \t\r\n";
+    clask::trim_string(value);
+    _ok(value == "", R"(value == "")");
+  }
+}
+
 void test_clask_request_cookie_value() {
   {
     clask::request req(
@@ -633,6 +646,7 @@ int main() {
   subtest("test_clask_request_parse_multipart4", test_clask_request_parse_multipart4);
   subtest("test_clask_request_parse_multipart5", test_clask_request_parse_multipart5);
   subtest("test_clask_to_wstring", test_clask_to_wstring);
+  subtest("test_clask_trim_string", test_clask_trim_string);
   subtest("test_clask_request_cookie_value", test_clask_request_cookie_value);
   subtest("test_clask_request_uri_param", test_clask_request_uri_param);
   subtest("test_clask_post_route_match", test_clask_post_route_match);
