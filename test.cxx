@@ -188,6 +188,25 @@ void test_clask_post_route_match() {
   _ok(invalid == false, R"(invalid == false)");
 }
 
+void test_clask_query_route_match() {
+  auto s = clask::server();
+  s.QUERY("/search/:id", [](clask::request& req) -> std::string {
+    return req.args[0];
+  });
+
+  std::vector<std::string> req_args;
+  auto result = s.test_match("QUERY", "/search/42", [&](const clask::func_t& /*fn*/, const std::vector<std::string>& args) {
+    req_args = args;
+  });
+  _ok(result == true, R"(result == true)");
+  _ok(req_args.size() == 1, R"(req_args.size() == 1)");
+  _ok(req_args[0] == "42", R"(req_args[0] == "42")");
+
+  auto other_method = s.test_match("GET", "/search/42", [&](const clask::func_t& /*fn*/, const std::vector<std::string>& /*args*/) {
+  });
+  _ok(other_method == false, R"(other_method == false)");
+}
+
 void test_clask_root_route_match() {
   auto s = clask::server();
   s.GET("/", [](clask::request& /*req*/) -> std::string {
@@ -266,6 +285,11 @@ void test_clask_parse_route_method() {
     auto method = clask::parse_route_method("POST");
     _ok(method.has_value() == true, R"(method.has_value() == true)");
     _ok(*method == clask::route_method::post, R"(*method == clask::route_method::post)");
+  }
+  {
+    auto method = clask::parse_route_method("QUERY");
+    _ok(method.has_value() == true, R"(method.has_value() == true)");
+    _ok(*method == clask::route_method::query, R"(*method == clask::route_method::query)");
   }
   {
     auto method = clask::parse_route_method("DELETE");
@@ -448,6 +472,7 @@ int main() {
   subtest("test_clask_to_wstring", test_clask_to_wstring);
   subtest("test_clask_request_uri_param", test_clask_request_uri_param);
   subtest("test_clask_post_route_match", test_clask_post_route_match);
+  subtest("test_clask_query_route_match", test_clask_query_route_match);
   subtest("test_clask_root_route_match", test_clask_root_route_match);
   subtest("test_clask_static_dir_route_match", test_clask_static_dir_route_match);
   subtest("test_clask_parse_listen_address", test_clask_parse_listen_address);
