@@ -1159,7 +1159,7 @@ inline std::string request::cookie_value(const std::string& name) {
         }
       }
       if (found) {
-        if (path.empty() || uri.substr(path.size()) == path) {
+        if (path.empty() || uri.compare(0, path.size(), path) == 0) {
           return value;
         }
       }

@@ -121,6 +121,33 @@ void test_clask_to_wstring() {
   _ok(clask::to_wstring("あいうえお") == L"あいうえお", R"(clask::to_wstring("あいうえお") == L"あいうえお")");
 }
 
+void test_clask_request_cookie_value() {
+  {
+    clask::request req(
+        "GET",
+        "/admin/dashboard",
+        "/admin/dashboard",
+        {},
+        {
+          { "Cookie", "session=abc123; path=/admin" },
+        },
+        "");
+    _ok(req.cookie_value("session") == "abc123", R"(req.cookie_value("session") == "abc123")");
+  }
+  {
+    clask::request req(
+        "GET",
+        "/public",
+        "/public",
+        {},
+        {
+          { "Cookie", "session=abc123; path=/admin" },
+        },
+        "");
+    _ok(req.cookie_value("session") == "", R"(req.cookie_value("session") == "")");
+  }
+}
+
 void test_clask_request_uri_param() {
   typedef struct {
     bool result;
@@ -475,6 +502,7 @@ int main() {
   subtest("test_clask_request_parse_multipart3", test_clask_request_parse_multipart3);
   subtest("test_clask_request_parse_multipart4", test_clask_request_parse_multipart4);
   subtest("test_clask_to_wstring", test_clask_to_wstring);
+  subtest("test_clask_request_cookie_value", test_clask_request_cookie_value);
   subtest("test_clask_request_uri_param", test_clask_request_uri_param);
   subtest("test_clask_post_route_match", test_clask_post_route_match);
   subtest("test_clask_query_route_match", test_clask_query_route_match);
