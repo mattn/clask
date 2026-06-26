@@ -627,10 +627,12 @@ inline std::string camelize(std::string& s) {
 
 inline void trim_string(std::string& s, const std::string& cutsel = " \t\v\r\n") {
   auto left = s.find_first_not_of(cutsel);
-  if (left != std::string::npos) {
-    auto right = s.find_last_not_of(cutsel);
-    s = s.substr(left, right - left + 1);
+  if (left == std::string::npos) {
+    s.clear();
+    return;
   }
+  auto right = s.find_last_not_of(cutsel);
+  s = s.substr(left, right - left + 1);
 }
 
 inline std::vector<std::string> split_string(const std::string& s, char delim, size_t max_elems = -1) {
