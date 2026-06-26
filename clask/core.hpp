@@ -1300,13 +1300,17 @@ inline request_read_result read_request_from_socket(int s) {
     auto rest = content_length - (buflen - pret);
     buflen = 0;
     while (rest > 0) {
-      while ((rret = recv(s, buf + buflen, (int) (sizeof(buf) - buflen), MSG_NOSIGNAL)) == -1 && errno == EINTR);
+      auto chunk_size = std::min(rest, sizeof(buf));
+      while ((rret = recv(s, buf + buflen, (int) chunk_size, MSG_NOSIGNAL)) == -1 && errno == EINTR);
       if (rret <= 0) {
         return make_request_read_error(0, "", "");
       }
       req_body.append(buf, rret);
-      rest -= rret;
+      rest -= (size_t) rret;
     }
+  }
+  if (has_content_length && req_body.size() > content_length) {
+    req_body.resize(content_length);
   }
 
   return make_request_read_success(
