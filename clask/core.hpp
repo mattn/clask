@@ -1075,20 +1075,25 @@ inline bool request::parse_multipart(std::vector<part>& parts) {
   if (boundary.empty()) {
     return false;
   }
-  boundary = "--" + boundary;
+  const auto delimiter = "--" + boundary;
 
-  size_t pos = 0;
-  while (true) {
-    auto next = body.find(boundary + "\r\n", pos + 1);
+  size_t pos = body.find(delimiter);
+  while (pos != std::string::npos) {
+    auto part_start = pos + delimiter.size();
+    if (body.compare(part_start, 2, "--") == 0) {
+      break;
+    }
+    if (body.compare(part_start, 2, "\r\n") != 0) {
+      return false;
+    }
+    part_start += 2;
+
+    auto next = body.find("\r\n" + delimiter, part_start);
     if (next == std::string::npos) {
-      next = body.find(boundary + "--\r\n", pos + 1);
-      if (next == std::string::npos) {
-        break;
-      }
-      boundary += "--";
+      return false;
     }
 
-    auto data = body.substr(pos + boundary.size(), next);
+    auto data = body.substr(part_start, next - part_start);
 
     auto eos = data.find("\r\n\r\n");
     if (eos == std::string::npos) {
@@ -1122,11 +1127,7 @@ inline bool request::parse_multipart(std::vector<part>& parts) {
       .body = data = data.substr(eos + 4)
     };
     parts.emplace_back(std::move(p));
-    pos = next + boundary.size() + 1;
-    if ((body.at(pos) == '-' && body.at(pos + 1) == '-'
-        && body.at(pos + 2) == '\n') || body.at(pos) != '\n') {
-      break;
-    }
+    pos = next + 2;
   }
   return true;
 }

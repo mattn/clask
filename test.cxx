@@ -65,6 +65,7 @@ void test_clask_request_parse_multipart2() {
   _ok(result == true, R"(result == true)");
   _ok(parts.size() == 1, R"(parts.size() == 1)");
   _ok(parts[0].name() == "field1", R"(parts[0].name() == "field1")");
+  _ok(parts[0].body == "value1", R"(parts[0].body == "value1")");
 }
 
 void test_clask_request_parse_multipart3() {
@@ -90,6 +91,38 @@ void test_clask_request_parse_multipart3() {
   _ok(parts.size() == 1, R"(parts.size() == 1)");
   _ok(parts[0].name() == "field1", R"(parts[0].name() == "field1")");
   _ok(parts[0].filename() == "README.md", R"(parts[0].filename() == "README.md")");
+  _ok(parts[0].body == "value1", R"(parts[0].body == "value1")");
+}
+
+void test_clask_request_parse_multipart5() {
+  std::vector<clask::part> parts;
+  bool result;
+
+  parts.clear();
+  clask::request req(
+      "GET",
+      "/",
+      "/",
+      {},
+      {
+        { "Content-Type", R"(multipart/form-data;boundary="boundary")" },
+      },
+      "--boundary\r\n"
+      "Content-Disposition: form-data; name=\"field1\"\r\n"
+      "\r\n"
+      "value1\r\n"
+      "--boundary\r\n"
+      "Content-Disposition: form-data; name=\"field2\"\r\n"
+      "\r\n"
+      "value2\r\n"
+      "--boundary--\r\n");
+  result = req.parse_multipart(parts);
+  _ok(result == true, R"(result == true)");
+  _ok(parts.size() == 2, R"(parts.size() == 2)");
+  _ok(parts[0].name() == "field1", R"(parts[0].name() == "field1")");
+  _ok(parts[0].body == "value1", R"(parts[0].body == "value1")");
+  _ok(parts[1].name() == "field2", R"(parts[1].name() == "field2")");
+  _ok(parts[1].body == "value2", R"(parts[1].body == "value2")");
 }
 
 void test_clask_request_parse_multipart4() {
@@ -501,6 +534,7 @@ int main() {
   subtest("test_clask_request_parse_multipart2", test_clask_request_parse_multipart2);
   subtest("test_clask_request_parse_multipart3", test_clask_request_parse_multipart3);
   subtest("test_clask_request_parse_multipart4", test_clask_request_parse_multipart4);
+  subtest("test_clask_request_parse_multipart5", test_clask_request_parse_multipart5);
   subtest("test_clask_to_wstring", test_clask_to_wstring);
   subtest("test_clask_request_cookie_value", test_clask_request_cookie_value);
   subtest("test_clask_request_uri_param", test_clask_request_uri_param);
