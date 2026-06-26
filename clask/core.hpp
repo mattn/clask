@@ -616,10 +616,11 @@ inline std::wstring to_wstring(const std::string& input) {
 inline std::string camelize(std::string& s) {
   auto n = s.length();
   for (size_t i = 0; i < n; i++) {
+    auto uc = static_cast<unsigned char>(s[i]);
     if (i == 0 || s[i - 1] == ' ' || s[i - 1] == '-') {
-      s[i] = (char) std::toupper(s[i]);
+      s[i] = (char) std::toupper(uc);
     } else {
-      s[i] = (char) std::tolower(s[i]);
+      s[i] = (char) std::tolower(uc);
     }
   }
   return s.substr(0, n);
@@ -688,7 +689,9 @@ inline std::string url_decode(const std::string &s) {
   std::string ret;
   const char* p = s.c_str();
   while (*p) {
-    if (*p == '%' && p[1] && p[2] && std::isxdigit(p[1]) && std::isxdigit(p[2])) {
+    auto hi_char = static_cast<unsigned char>(p[1]);
+    auto lo_char = static_cast<unsigned char>(p[2]);
+    if (*p == '%' && p[1] && p[2] && std::isxdigit(hi_char) && std::isxdigit(lo_char)) {
       const int hi = p[1] - (p[1] <= '9' ? '0' : (p[1] <= 'F' ? 'A' : 'a') - 10);
       const int lo = p[2] - (p[2] <= '9' ? '0' : (p[2] <= 'F' ? 'A' : 'a') - 10);
       ret += static_cast<char>(16 * hi + lo);
@@ -745,7 +748,7 @@ inline std::string part::filename() {
     }
     if (sub.size() >= 10 && sub.substr(0, 10) == "filename*=") {
       sub = sub.substr(10);
-      for (auto& c : sub) c = (char) std::tolower(c);
+      for (auto& c : sub) c = (char) std::tolower(static_cast<unsigned char>(c));
       if (sub.size() >= 7 && sub.substr(0, 7) == "utf-8''") {
         sub = url_decode(sub.substr(7));
         trim_string(sub, "\"");
@@ -1290,7 +1293,7 @@ inline request_read_result read_request_from_socket(int s) {
       content_length = *parsed_content_length;
       has_content_length = true;
     } else if (key == "Connection") {
-      for (auto& c : val) c = (char) std::tolower(c);
+      for (auto& c : val) c = (char) std::tolower(static_cast<unsigned char>(c));
       if (val == "keep-alive")
         keep_alive = true;
       else if (val == "close")

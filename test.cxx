@@ -173,6 +173,11 @@ void test_clask_url_encode() {
   _ok(clask::url_encode("あ") == "%E3%81%82", "utf-8 bytes are encoded");
 }
 
+void test_clask_url_decode() {
+  _ok(clask::url_decode("hello%20world") == "hello world", "escaped space is decoded");
+  _ok(clask::url_decode("%あ") == "%あ", "non-hex escape is preserved");
+}
+
 void test_clask_request_cookie_value() {
   {
     clask::request req(
@@ -654,6 +659,7 @@ int main() {
   subtest("test_clask_to_wstring", test_clask_to_wstring);
   subtest("test_clask_trim_string", test_clask_trim_string);
   subtest("test_clask_url_encode", test_clask_url_encode);
+  subtest("test_clask_url_decode", test_clask_url_decode);
   subtest("test_clask_request_cookie_value", test_clask_request_cookie_value);
   subtest("test_clask_request_uri_param", test_clask_request_uri_param);
   subtest("test_clask_post_route_match", test_clask_post_route_match);
