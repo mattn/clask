@@ -124,6 +124,7 @@ struct path_segment {
 enum class route_method {
   get,
   post,
+  query,
 };
 
 inline void drain_completed_connections(server_runtime_state& runtime);
@@ -339,6 +340,9 @@ inline std::optional<route_method> parse_route_method(const std::string& method)
   }
   if (method == "POST") {
     return route_method::post;
+  }
+  if (method == "QUERY") {
+    return route_method::query;
   }
   return std::nullopt;
 }
@@ -1451,6 +1455,7 @@ class server_t {
 private:
   node get_routes_;
   node post_routes_;
+  node query_routes_;
   unsigned int worker_count_;
   size_t accept_queue_limit_;
   int socket_timeout_ms_;
@@ -1466,7 +1471,8 @@ private:
 public:
 #define CLASK_DEFINE_REQUEST(name) \
 void GET(const std::string&, const functor_ ## name); \
-void POST(const std::string&, const functor_ ## name);
+void POST(const std::string&, const functor_ ## name); \
+void QUERY(const std::string&, const functor_ ## name);
   CLASK_DEFINE_REQUEST(writer)
   CLASK_DEFINE_REQUEST(string)
   CLASK_DEFINE_REQUEST(response)
@@ -1481,7 +1487,7 @@ void POST(const std::string&, const functor_ ## name);
   void run(const std::string&);
   void run(int);
   logger log;
-  server_t() : get_routes_{}, post_routes_{}, worker_count_{0}, accept_queue_limit_{0}, socket_timeout_ms_{keep_alive_timeout_ms} {}
+  server_t() : get_routes_{}, post_routes_{}, query_routes_{}, worker_count_{0}, accept_queue_limit_{0}, socket_timeout_ms_{keep_alive_timeout_ms} {}
 #ifdef CLASK_TEST
   bool test_match(const std::string&, const std::string&, const std::function<void(const func_t& fn, const std::vector<std::string>&)>&) const;
 #endif
@@ -1521,12 +1527,18 @@ inline node& server_t::route_tree(route_method method) {
   if (method == route_method::get) {
     return get_routes_;
   }
+  if (method == route_method::query) {
+    return query_routes_;
+  }
   return post_routes_;
 }
 
 inline const node& server_t::route_tree(route_method method) const {
   if (method == route_method::get) {
     return get_routes_;
+  }
+  if (method == route_method::query) {
+    return query_routes_;
   }
   return post_routes_;
 }
@@ -1676,6 +1688,11 @@ inline void server_t::GET(const std::string& path, functor_ ## name fn) { \
 } \
 inline void server_t::POST(const std::string& path, functor_ ## name fn) { \
   register_route(route_method::post, path, [&](func_t& func) { \
+    func.f_ ## name = std::move(fn); \
+  }); \
+} \
+inline void server_t::QUERY(const std::string& path, functor_ ## name fn) { \
+  register_route(route_method::query, path, [&](func_t& func) { \
     func.f_ ## name = std::move(fn); \
   }); \
 }
