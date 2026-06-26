@@ -1622,6 +1622,10 @@ inline bool server_t::match(route_method method, const std::string& s, const std
     if (!found)
       break;
     offset = segment.next_offset;
+    if (n->fn.prefix_match) {
+      prefix_fn = &n->fn;
+      prefix_args = args;
+    }
     if (offset >= s.size()) {
       fn(n->fn, args);
       return true;
