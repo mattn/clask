@@ -1205,6 +1205,22 @@ inline request_read_result make_request_read_success(
   };
 }
 
+inline std::optional<size_t> parse_content_length(const std::string& value) {
+  if (value.empty() || value[0] == '-') {
+    return std::nullopt;
+  }
+  try {
+    size_t parsed_len = 0;
+    auto parsed = std::stoull(value, &parsed_len, 10);
+    if (parsed_len != value.size()) {
+      return std::nullopt;
+    }
+    return static_cast<size_t>(parsed);
+  } catch (const std::exception&) {
+    return std::nullopt;
+  }
+}
+
 inline request_read_result read_request_from_socket(int s) {
   char buf[16384];
   const char *method, *path;
@@ -1264,7 +1280,11 @@ inline request_read_result read_request_from_socket(int s) {
     auto val = std::string(headers[n].value, headers[n].value_len);
     camelize(key);
     if (key == "Content-Length") {
-      content_length = std::stoi(val);
+      auto parsed_content_length = parse_content_length(val);
+      if (!parsed_content_length.has_value()) {
+        return make_request_read_error(400, "Bad Request", "Invalid Content-Length");
+      }
+      content_length = *parsed_content_length;
       has_content_length = true;
     } else if (key == "Connection") {
       for (auto& c : val) c = (char) std::tolower(c);

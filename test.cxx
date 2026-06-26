@@ -459,6 +459,41 @@ void test_clask_request_read_result_helpers() {
   }
 }
 
+void test_clask_parse_content_length() {
+  {
+    auto result = clask::parse_content_length("123");
+    _ok(result.has_value() == true, R"(result.has_value() == true)");
+    _ok(*result == 123, R"(*result == 123)");
+  }
+  _ok(clask::parse_content_length("").has_value() == false, R"(clask::parse_content_length("").has_value() == false)");
+  _ok(clask::parse_content_length("-1").has_value() == false, R"(clask::parse_content_length("-1").has_value() == false)");
+  _ok(clask::parse_content_length("abc").has_value() == false, R"(clask::parse_content_length("abc").has_value() == false)");
+  _ok(clask::parse_content_length("12x").has_value() == false, R"(clask::parse_content_length("12x").has_value() == false)");
+}
+
+void test_clask_read_request_invalid_content_length() {
+  int fds[2];
+  auto socket_result = socketpair(AF_UNIX, SOCK_STREAM, 0, fds);
+  _ok(socket_result == 0, R"(socket_result == 0)");
+
+  const std::string request =
+      "POST / HTTP/1.1\r\n"
+      "Host: localhost\r\n"
+      "Content-Length: abc\r\n"
+      "\r\n";
+  auto written = write(fds[0], request.data(), request.size());
+  _ok(written == (ssize_t) request.size(), R"(written == (ssize_t) request.size())");
+  shutdown(fds[0], SHUT_WR);
+
+  auto result = clask::read_request_from_socket(fds[1]);
+  _ok(result.ok == false, R"(result.ok == false)");
+  _ok(result.error_code == 400, R"(result.error_code == 400)");
+  _ok(std::string(result.error_body) == "Invalid Content-Length", R"(std::string(result.error_body) == "Invalid Content-Length")");
+
+  closesocket(fds[0]);
+  closesocket(fds[1]);
+}
+
 void test_clask_parent_reference_guard() {
   _ok(clask::contains_parent_reference("../secret") == true, R"(clask::contains_parent_reference("../secret") == true)");
   _ok(clask::contains_parent_reference("safe/path") == false, R"(clask::contains_parent_reference("safe/path") == false)");
@@ -586,6 +621,8 @@ int main() {
   subtest("test_clask_parse_route_method", test_clask_parse_route_method);
   subtest("test_clask_parse_path_segment", test_clask_parse_path_segment);
   subtest("test_clask_request_read_result_helpers", test_clask_request_read_result_helpers);
+  subtest("test_clask_parse_content_length", test_clask_parse_content_length);
+  subtest("test_clask_read_request_invalid_content_length", test_clask_read_request_invalid_content_length);
   subtest("test_clask_parent_reference_guard", test_clask_parent_reference_guard);
   subtest("test_clask_server_runtime_helpers", test_clask_server_runtime_helpers);
   subtest("test_clask_fluent_server_setup", test_clask_fluent_server_setup);
