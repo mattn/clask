@@ -1602,15 +1602,21 @@ inline bool server_t::match(route_method method, const std::string& s, const std
     auto segment = parse_path_segment(s, offset);
     bool found = false;
     for (const auto& vv : n->children) {
-      if (vv.placeholder) {
-        args.emplace_back(url_decode(segment.value));
+      if (!vv.placeholder
+          && (vv.name == segment.value || (vv.name.empty() && segment.value.empty()))) {
         n = &vv;
         found = true;
         break;
-      } else if (vv.name == segment.value || (vv.name.empty() && segment.value.empty())) {
-        n = &vv;
-        found = true;
-        break;
+      }
+    }
+    if (!found) {
+      for (const auto& vv : n->children) {
+        if (vv.placeholder) {
+          args.emplace_back(url_decode(segment.value));
+          n = &vv;
+          found = true;
+          break;
+        }
       }
     }
     if (!found)
