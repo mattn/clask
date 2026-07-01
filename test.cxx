@@ -8,6 +8,64 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
+#ifdef _WIN32
+# ifndef SHUT_WR
+#  define SHUT_WR SD_SEND
+# endif
+#endif
+
+// Create a connected pair of sockets, portable across POSIX and Winsock.
+// Winsock has no socketpair(), so emulate it over a loopback TCP connection.
+static bool make_socket_pair(int fds[2]) {
+#ifdef _WIN32
+  clask::initialize_network_runtime();
+  SOCKET listener = ::socket(AF_INET, SOCK_STREAM, 0);
+  if (listener == INVALID_SOCKET) return false;
+  sockaddr_in addr;
+  memset(&addr, 0, sizeof(addr));
+  addr.sin_family = AF_INET;
+  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  addr.sin_port = 0;
+  int addrlen = sizeof(addr);
+  if (bind(listener, (sockaddr*) &addr, addrlen) != 0 ||
+      getsockname(listener, (sockaddr*) &addr, &addrlen) != 0 ||
+      listen(listener, 1) != 0) {
+    closesocket(listener);
+    return false;
+  }
+  SOCKET client = ::socket(AF_INET, SOCK_STREAM, 0);
+  if (client == INVALID_SOCKET) {
+    closesocket(listener);
+    return false;
+  }
+  if (connect(client, (sockaddr*) &addr, addrlen) != 0) {
+    closesocket(listener);
+    closesocket(client);
+    return false;
+  }
+  SOCKET server = accept(listener, nullptr, nullptr);
+  closesocket(listener);
+  if (server == INVALID_SOCKET) {
+    closesocket(client);
+    return false;
+  }
+  fds[0] = (int) client;
+  fds[1] = (int) server;
+  return true;
+#else
+  return socketpair(AF_UNIX, SOCK_STREAM, 0, fds) == 0;
+#endif
+}
+
+// Write to a socket fd portably (Winsock has no write() for sockets).
+static ssize_t socket_write(int fd, const void* buf, size_t n) {
+#ifdef _WIN32
+  return send((SOCKET) fd, (const char*) buf, (int) n, 0);
+#else
+  return write(fd, buf, n);
+#endif
+}
+
 void test_clask_params() {
   std::unordered_map<std::string, std::string> result;
   result = clask::params("foo");
@@ -497,15 +555,15 @@ void test_clask_parse_content_length() {
 
 void test_clask_read_request_invalid_content_length() {
   int fds[2];
-  auto socket_result = socketpair(AF_UNIX, SOCK_STREAM, 0, fds);
-  _ok(socket_result == 0, R"(socket_result == 0)");
+  auto socket_result = make_socket_pair(fds);
+  _ok(socket_result == true, R"(socket_result == true)");
 
   const std::string request =
       "POST / HTTP/1.1\r\n"
       "Host: localhost\r\n"
       "Content-Length: abc\r\n"
       "\r\n";
-  auto written = write(fds[0], request.data(), request.size());
+  auto written = socket_write(fds[0], request.data(), request.size());
   _ok(written == (ssize_t) request.size(), R"(written == (ssize_t) request.size())");
   shutdown(fds[0], SHUT_WR);
 
@@ -520,8 +578,8 @@ void test_clask_read_request_invalid_content_length() {
 
 void test_clask_read_request_content_length_bounds_body() {
   int fds[2];
-  auto socket_result = socketpair(AF_UNIX, SOCK_STREAM, 0, fds);
-  _ok(socket_result == 0, R"(socket_result == 0)");
+  auto socket_result = make_socket_pair(fds);
+  _ok(socket_result == true, R"(socket_result == true)");
 
   const std::string request =
       "POST / HTTP/1.1\r\n"
@@ -529,7 +587,7 @@ void test_clask_read_request_content_length_bounds_body() {
       "Content-Length: 3\r\n"
       "\r\n"
       "abcdef";
-  auto written = write(fds[0], request.data(), request.size());
+  auto written = socket_write(fds[0], request.data(), request.size());
   _ok(written == (ssize_t) request.size(), R"(written == (ssize_t) request.size())");
   shutdown(fds[0], SHUT_WR);
 
