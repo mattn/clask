@@ -486,7 +486,8 @@ inline void accept_ready_connection(
 
   connection_state conn{};
   if (!accept_connection(server_fd, conn)) {
-    throw std::runtime_error("accept");
+    socket_perror("accept");
+    return;
   }
   runtime.tracked_connections++;
   enqueue_ready_connection(runtime, std::move(conn));

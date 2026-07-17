@@ -767,6 +767,19 @@ void test_clask_parent_reference_guard() {
   _ok(clask::contains_parent_reference("..") == true, R"(clask::contains_parent_reference("..") == true)");
 }
 
+void test_clask_accept_failure_does_not_throw() {
+  clask::server_runtime_state runtime;
+  auto thrown = false;
+  try {
+    clask::accept_ready_connection(-1, 4, runtime);
+  } catch (const std::exception&) {
+    thrown = true;
+  }
+  _ok(thrown == false, R"(thrown == false)");
+  _ok(runtime.tracked_connections.load() == 0, R"(runtime.tracked_connections.load() == 0)");
+  _ok(runtime.ready_queue.empty() == true, R"(runtime.ready_queue.empty() == true)");
+}
+
 void test_clask_server_runtime_helpers() {
   _ok(clask::resolve_worker_count(7) == 7, R"(clask::resolve_worker_count(7) == 7)");
   _ok(clask::resolve_accept_queue_limit(123, 7) == 123, R"(clask::resolve_accept_queue_limit(123, 7) == 123)");
@@ -900,6 +913,7 @@ int main() {
   subtest("test_clask_serve_file_if_modified_since", test_clask_serve_file_if_modified_since);
   subtest("test_clask_sse_writer_output", test_clask_sse_writer_output);
   subtest("test_clask_parent_reference_guard", test_clask_parent_reference_guard);
+  subtest("test_clask_accept_failure_does_not_throw", test_clask_accept_failure_does_not_throw);
   subtest("test_clask_server_runtime_helpers", test_clask_server_runtime_helpers);
   subtest("test_clask_fluent_server_setup", test_clask_fluent_server_setup);
   subtest("test_clask_static_path_resolution", test_clask_static_path_resolution);
