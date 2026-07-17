@@ -83,6 +83,11 @@ void test_clask_params() {
   result = clask::params("hello%20world=good%2Fday");
   _ok(result.size() == 1, R"(result.size() == 1)");
   _ok(result["hello world"] == "good/day", R"(result["hello world"] == "good/day")");
+
+  result = clask::params("greeting=hello+world&plus=1%2B2");
+  _ok(result.size() == 2, R"(result.size() == 2)");
+  _ok(result["greeting"] == "hello world", R"(result["greeting"] == "hello world")");
+  _ok(result["plus"] == "1+2", R"(result["plus"] == "1+2")");
 }
 
 void test_clask_request_parse_multipart1() {
