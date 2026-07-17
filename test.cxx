@@ -732,6 +732,32 @@ void test_clask_serve_file_if_modified_since() {
   remove(path.c_str());
 }
 
+void test_clask_sse_writer_output() {
+  int fds[2];
+  _ok(make_socket_pair(fds) == true, R"(make_socket_pair(fds) == true)");
+
+  {
+    clask::response_writer resp(fds[1], 200);
+    resp.set_header("Content-Type", "text/event-stream");
+    clask::server_sent_event_writer sse(resp);
+    sse.write("message", "hello");
+    sse.end();
+  }
+
+  std::string out;
+  char buf[4096];
+  ssize_t n;
+  while ((n = recv(fds[0], buf, sizeof(buf), 0)) > 0) {
+    out.append(buf, (size_t) n);
+  }
+  closesocket(fds[0]);
+
+  _ok(out.find("Transfer-Encoding") == std::string::npos, R"(out.find("Transfer-Encoding") == std::string::npos)");
+  _ok(
+      out.find("event: message\r\ndata: hello\r\n\r\n") != std::string::npos,
+      R"(out.find("event: message\r\ndata: hello\r\n\r\n") != std::string::npos)");
+}
+
 void test_clask_parent_reference_guard() {
   _ok(clask::contains_parent_reference("../secret") == true, R"(clask::contains_parent_reference("../secret") == true)");
   _ok(clask::contains_parent_reference("safe/path") == false, R"(clask::contains_parent_reference("safe/path") == false)");
@@ -869,6 +895,7 @@ int main() {
   subtest("test_clask_read_request_invalid_content_length", test_clask_read_request_invalid_content_length);
   subtest("test_clask_read_request_content_length_bounds_body", test_clask_read_request_content_length_bounds_body);
   subtest("test_clask_serve_file_if_modified_since", test_clask_serve_file_if_modified_since);
+  subtest("test_clask_sse_writer_output", test_clask_sse_writer_output);
   subtest("test_clask_parent_reference_guard", test_clask_parent_reference_guard);
   subtest("test_clask_server_runtime_helpers", test_clask_server_runtime_helpers);
   subtest("test_clask_fluent_server_setup", test_clask_fluent_server_setup);

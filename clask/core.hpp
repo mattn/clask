@@ -915,7 +915,6 @@ private:
   response_writer w;
 public:
   server_sent_event_writer(response_writer& w) : w(w) {
-    w.set_header("Transfer-Encoding", "chunked");
   };
   void write(const std::string& event, const std::string& data) {
     w.write("event: " + event + "\r\n");
