@@ -1076,6 +1076,9 @@ inline bool request::parse_multipart(std::vector<part>& parts) {
       boundary = sub;
       break;
     }
+    if (pos >= ct.size()) {
+      break;
+    }
     ct = ct.substr(pos + 1);
   }
   if (boundary.empty()) {
