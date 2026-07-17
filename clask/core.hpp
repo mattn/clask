@@ -718,7 +718,7 @@ inline std::string part::name() {
   while (!cd.empty()) {
     auto pos = cd.find(';');
     if (pos == std::string::npos) {
-      pos = cd.size() - 1;
+      pos = cd.size();
     }
     auto sub = cd.substr(0, pos);
     trim_string(sub, " \t");
@@ -726,6 +726,9 @@ inline std::string part::name() {
       sub = sub.substr(5);
       trim_string(sub, "\"");
       return sub;
+    }
+    if (pos >= cd.size()) {
+      break;
     }
     cd = cd.substr(pos + 1);
   }
@@ -737,7 +740,7 @@ inline std::string part::filename() {
   while (!cd.empty()) {
     auto pos = cd.find(';');
     if (pos == std::string::npos) {
-      pos = cd.size() - 1;
+      pos = cd.size();
     }
     auto sub = cd.substr(0, pos);
     trim_string(sub, " \t");
@@ -755,6 +758,9 @@ inline std::string part::filename() {
         return sub;
       }
       return sub;
+    }
+    if (pos >= cd.size()) {
+      break;
     }
     cd = cd.substr(pos + 1);
   }
