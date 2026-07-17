@@ -406,6 +406,34 @@ void test_clask_literal_route_priority() {
   _ok(matched_literal == true, R"(matched_literal == true)");
 }
 
+void test_clask_route_register_after_child() {
+  auto s = clask::server();
+  s.GET("/foo/bar", [](clask::request& /*req*/) -> std::string {
+    return "bar";
+  });
+  s.GET("/foo", [](clask::request& /*req*/) -> std::string {
+    return "foo";
+  });
+
+  auto matched_foo = false;
+  auto result = s.test_match("GET", "/foo", [&](const clask::func_t& fn, const std::vector<std::string>& args) {
+    clask::request req("GET", "/foo", "/foo", {}, {}, "");
+    req.args = args;
+    matched_foo = fn.f_string != nullptr && fn.f_string(req) == "foo";
+  });
+  _ok(result == true, R"(result == true)");
+  _ok(matched_foo == true, R"(matched_foo == true)");
+
+  auto matched_bar = false;
+  result = s.test_match("GET", "/foo/bar", [&](const clask::func_t& fn, const std::vector<std::string>& args) {
+    clask::request req("GET", "/foo/bar", "/foo/bar", {}, {}, "");
+    req.args = args;
+    matched_bar = fn.f_string != nullptr && fn.f_string(req) == "bar";
+  });
+  _ok(result == true, R"(result == true)");
+  _ok(matched_bar == true, R"(matched_bar == true)");
+}
+
 void test_clask_static_dir_route_match() {
   auto s = clask::server();
   s.static_dir("/", "./public");
@@ -747,6 +775,7 @@ int main() {
   subtest("test_clask_query_route_match", test_clask_query_route_match);
   subtest("test_clask_root_route_match", test_clask_root_route_match);
   subtest("test_clask_literal_route_priority", test_clask_literal_route_priority);
+  subtest("test_clask_route_register_after_child", test_clask_route_register_after_child);
   subtest("test_clask_static_dir_route_match", test_clask_static_dir_route_match);
   subtest("test_clask_non_root_static_dir_route_match", test_clask_non_root_static_dir_route_match);
   subtest("test_clask_parse_listen_address", test_clask_parse_listen_address);

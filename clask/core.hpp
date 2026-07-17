@@ -1583,6 +1583,7 @@ inline void server_t::parse_tree(node& n, const std::string& s, const func_t& fn
     bool found = false;
     for (auto& vv : n.children) {
       if (vv.name == segment.value) {
+        vv.fn = fn;
         found = true;
         break;
       }
