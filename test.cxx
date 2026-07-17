@@ -764,6 +764,37 @@ void test_clask_sse_writer_output() {
   _ok(
       out.find("event: message\r\ndata: hello\r\n\r\n") != std::string::npos,
       R"(out.find("event: message\r\ndata: hello\r\n\r\n") != std::string::npos)");
+  closesocket(fds[1]);
+}
+
+void test_clask_response_writer_end_keeps_socket_open() {
+  int fds[2];
+  _ok(make_socket_pair(fds) == true, R"(make_socket_pair(fds) == true)");
+
+  {
+    clask::response_writer resp(fds[1], 200);
+    resp.write("hello");
+    resp.end();
+  }
+
+  // end() must not close the descriptor: the connection handler closes it
+  // once, and a second close here could hit an unrelated connection that
+  // reused the same fd.
+  int err = 0;
+  socklen_t len = sizeof(err);
+  auto still_open = getsockopt(fds[1], SOL_SOCKET, SO_ERROR, (char*) &err, &len) == 0;
+  _ok(still_open == true, R"(still_open == true)");
+
+  std::string out;
+  char buf[4096];
+  ssize_t n;
+  while ((n = recv(fds[0], buf, sizeof(buf), 0)) > 0) {
+    out.append(buf, (size_t) n);
+  }
+  _ok(out.find("\r\n\r\nhello") != std::string::npos, R"(out.find("\r\n\r\nhello") != std::string::npos)");
+
+  closesocket(fds[0]);
+  closesocket(fds[1]);
 }
 
 void test_clask_parent_reference_guard() {
@@ -917,6 +948,7 @@ int main() {
   subtest("test_clask_read_request_content_length_bounds_body", test_clask_read_request_content_length_bounds_body);
   subtest("test_clask_serve_file_if_modified_since", test_clask_serve_file_if_modified_since);
   subtest("test_clask_sse_writer_output", test_clask_sse_writer_output);
+  subtest("test_clask_response_writer_end_keeps_socket_open", test_clask_response_writer_end_keeps_socket_open);
   subtest("test_clask_parent_reference_guard", test_clask_parent_reference_guard);
   subtest("test_clask_accept_failure_does_not_throw", test_clask_accept_failure_does_not_throw);
   subtest("test_clask_server_runtime_helpers", test_clask_server_runtime_helpers);
