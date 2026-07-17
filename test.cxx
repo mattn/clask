@@ -251,6 +251,9 @@ void test_clask_part_unquoted_last_param() {
 
 void test_clask_to_wstring() {
   _ok(clask::to_wstring("あいうえお") == L"あいうえお", R"(clask::to_wstring("あいうえお") == L"あいうえお")");
+  _ok(
+      clask::to_wstring("a\xF0\xA0\xAE\xB7z") == L"a\U00020BB7z",
+      R"(clask::to_wstring("a\xF0\xA0\xAE\xB7z") == L"a\U00020BB7z")");
 }
 
 void test_clask_trim_string() {

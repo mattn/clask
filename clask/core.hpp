@@ -604,6 +604,17 @@ inline std::wstring to_wstring(const std::string& input) {
       result.push_back(wc);
       i += 3;
     } else if ((c & 0xF8) == 0xF0 && i + 3 < input.length()) {
+      char32_t cp = ((c & 0x07) << 18)
+          | ((input[i + 1] & 0x3F) << 12)
+          | ((input[i + 2] & 0x3F) << 6)
+          | (input[i + 3] & 0x3F);
+      if constexpr (sizeof(wchar_t) >= 4) {
+        result.push_back((wchar_t) cp);
+      } else {
+        cp -= 0x10000;
+        result.push_back((wchar_t) (0xD800 + (cp >> 10)));
+        result.push_back((wchar_t) (0xDC00 + (cp & 0x3FF)));
+      }
       i += 4;
     } else {
       result.push_back(c);
