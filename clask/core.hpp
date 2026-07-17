@@ -39,6 +39,9 @@ inline static void socket_perror(const char *s) {
   std::cerr << s << ": " << buf << "\n";
 }
 typedef char sockopt_t;
+# ifndef SHUT_WR
+#  define SHUT_WR SD_SEND
+# endif
 #else
 # include <unistd.h>
 # include <sys/fcntl.h>
@@ -1044,7 +1047,10 @@ inline void response_writer::end() {
   if (!header_out) {
     write_headers();
   }
-  closesocket(s);
+  // The connection handler owns the socket and closes it exactly once
+  // after the request handler returns; closing here as well could close
+  // an unrelated connection that reused the same descriptor.
+  shutdown(s, SHUT_WR);
 }
 
 struct response {
