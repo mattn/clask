@@ -725,6 +725,9 @@ void test_clask_serve_file_if_modified_since() {
   {
     auto out = serve_file_with_header(path, "Fri, 01 Jan 2100 00:00:00 GMT");
     _ok(out.find("HTTP/1.1 304") == 0, R"(out.find("HTTP/1.1 304") == 0)");
+    _ok(
+        out.size() >= 4 && out.compare(out.size() - 4, 4, "\r\n\r\n") == 0,
+        R"(304 response has no body)");
   }
   {
     auto out = serve_file_with_header(path, "Mon, 01 Jan 1990 00:00:00 GMT");
