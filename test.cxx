@@ -622,6 +622,56 @@ void test_clask_read_request_content_length_bounds_body() {
   closesocket(fds[1]);
 }
 
+static std::string serve_file_with_header(
+    const std::string& path,
+    const std::string& if_modified_since) {
+  int fds[2];
+  if (!make_socket_pair(fds)) {
+    return "";
+  }
+  clask::response_writer resp(fds[1], 200);
+  std::vector<clask::header> headers;
+  if (!if_modified_since.empty()) {
+    headers.emplace_back("If-Modified-Since", if_modified_since);
+  }
+  clask::request req("GET", "/f.txt", "/f.txt", {}, headers, "");
+  clask::serve_file(resp, req, path);
+  closesocket(fds[1]);
+  std::string out;
+  char buf[4096];
+  ssize_t n;
+  while ((n = recv(fds[0], buf, sizeof(buf), 0)) > 0) {
+    out.append(buf, (size_t) n);
+  }
+  closesocket(fds[0]);
+  return out;
+}
+
+void test_clask_serve_file_if_modified_since() {
+  const std::string path = "./test_if_modified_since.txt";
+  {
+    std::ofstream ofs(path, std::ios::binary);
+    ofs << "hello";
+  }
+
+  {
+    auto out = serve_file_with_header(path, "Fri, 01 Jan 2100 00:00:00 GMT");
+    _ok(out.find("HTTP/1.1 304") == 0, R"(out.find("HTTP/1.1 304") == 0)");
+  }
+  {
+    auto out = serve_file_with_header(path, "Mon, 01 Jan 1990 00:00:00 GMT");
+    _ok(out.find("HTTP/1.1 200") == 0, R"(out.find("HTTP/1.1 200") == 0)");
+    _ok(out.find("\r\n\r\nhello") != std::string::npos, R"(out.find("\r\n\r\nhello") != std::string::npos)");
+  }
+  {
+    auto out = serve_file_with_header(path, "");
+    _ok(out.find("HTTP/1.1 200") == 0, R"(out.find("HTTP/1.1 200") == 0)");
+    _ok(out.find("\r\n\r\nhello") != std::string::npos, R"(out.find("\r\n\r\nhello") != std::string::npos)");
+  }
+
+  remove(path.c_str());
+}
+
 void test_clask_parent_reference_guard() {
   _ok(clask::contains_parent_reference("../secret") == true, R"(clask::contains_parent_reference("../secret") == true)");
   _ok(clask::contains_parent_reference("safe/path") == false, R"(clask::contains_parent_reference("safe/path") == false)");
@@ -756,6 +806,7 @@ int main() {
   subtest("test_clask_parse_content_length", test_clask_parse_content_length);
   subtest("test_clask_read_request_invalid_content_length", test_clask_read_request_invalid_content_length);
   subtest("test_clask_read_request_content_length_bounds_body", test_clask_read_request_content_length_bounds_body);
+  subtest("test_clask_serve_file_if_modified_since", test_clask_serve_file_if_modified_since);
   subtest("test_clask_parent_reference_guard", test_clask_parent_reference_guard);
   subtest("test_clask_server_runtime_helpers", test_clask_server_runtime_helpers);
   subtest("test_clask_fluent_server_setup", test_clask_fluent_server_setup);
