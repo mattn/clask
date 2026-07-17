@@ -230,6 +230,25 @@ void test_clask_request_parse_multipart6() {
   _ok(result == false, R"(result == false)");
 }
 
+void test_clask_part_unquoted_last_param() {
+  {
+    clask::part p;
+    p.headers.emplace_back("Content-Disposition", "form-data; name=field1");
+    _ok(p.name() == "field1", R"(p.name() == "field1")");
+  }
+  {
+    clask::part p;
+    p.headers.emplace_back("Content-Disposition", "form-data; filename=a.txt");
+    _ok(p.filename() == "a.txt", R"(p.filename() == "a.txt")");
+  }
+  {
+    clask::part p;
+    p.headers.emplace_back("Content-Disposition", "form-data; name=field1; filename=a.txt");
+    _ok(p.name() == "field1", R"(p.name() == "field1")");
+    _ok(p.filename() == "a.txt", R"(p.filename() == "a.txt")");
+  }
+}
+
 void test_clask_to_wstring() {
   _ok(clask::to_wstring("あいうえお") == L"あいうえお", R"(clask::to_wstring("あいうえお") == L"あいうえお")");
 }
@@ -765,6 +784,7 @@ int main() {
   subtest("test_clask_request_parse_multipart4", test_clask_request_parse_multipart4);
   subtest("test_clask_request_parse_multipart5", test_clask_request_parse_multipart5);
   subtest("test_clask_request_parse_multipart6", test_clask_request_parse_multipart6);
+  subtest("test_clask_part_unquoted_last_param", test_clask_part_unquoted_last_param);
   subtest("test_clask_to_wstring", test_clask_to_wstring);
   subtest("test_clask_trim_string", test_clask_trim_string);
   subtest("test_clask_url_encode", test_clask_url_encode);
