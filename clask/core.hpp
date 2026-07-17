@@ -1248,7 +1248,7 @@ inline request_read_result make_request_read_success(
 }
 
 inline std::optional<size_t> parse_content_length(const std::string& value) {
-  if (value.empty() || value[0] == '-') {
+  if (value.empty() || !std::isdigit(static_cast<unsigned char>(value[0]))) {
     return std::nullopt;
   }
   try {
@@ -1323,7 +1323,8 @@ inline request_read_result read_request_from_socket(int s) {
     camelize(key);
     if (key == "Content-Length") {
       auto parsed_content_length = parse_content_length(val);
-      if (!parsed_content_length.has_value()) {
+      if (!parsed_content_length.has_value()
+          || (has_content_length && *parsed_content_length != content_length)) {
         return make_request_read_error(400, "Bad Request", "Invalid Content-Length");
       }
       content_length = *parsed_content_length;

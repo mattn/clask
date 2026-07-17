@@ -641,6 +641,32 @@ void test_clask_parse_content_length() {
   _ok(clask::parse_content_length("-1").has_value() == false, R"(clask::parse_content_length("-1").has_value() == false)");
   _ok(clask::parse_content_length("abc").has_value() == false, R"(clask::parse_content_length("abc").has_value() == false)");
   _ok(clask::parse_content_length("12x").has_value() == false, R"(clask::parse_content_length("12x").has_value() == false)");
+  _ok(clask::parse_content_length("+123").has_value() == false, R"(clask::parse_content_length("+123").has_value() == false)");
+  _ok(clask::parse_content_length(" 123").has_value() == false, R"(clask::parse_content_length(" 123").has_value() == false)");
+}
+
+void test_clask_read_request_conflicting_content_length() {
+  int fds[2];
+  auto socket_result = make_socket_pair(fds);
+  _ok(socket_result == true, R"(socket_result == true)");
+
+  const std::string request =
+      "POST / HTTP/1.1\r\n"
+      "Host: localhost\r\n"
+      "Content-Length: 3\r\n"
+      "Content-Length: 10\r\n"
+      "\r\n"
+      "abc";
+  auto written = socket_write(fds[0], request.data(), request.size());
+  _ok(written == (ssize_t) request.size(), R"(written == (ssize_t) request.size())");
+  shutdown(fds[0], SHUT_WR);
+
+  auto result = clask::read_request_from_socket(fds[1]);
+  _ok(result.ok == false, R"(result.ok == false)");
+  _ok(result.error_code == 400, R"(result.error_code == 400)");
+
+  closesocket(fds[0]);
+  closesocket(fds[1]);
 }
 
 void test_clask_read_request_invalid_content_length() {
@@ -945,6 +971,7 @@ int main() {
   subtest("test_clask_request_read_result_helpers", test_clask_request_read_result_helpers);
   subtest("test_clask_parse_content_length", test_clask_parse_content_length);
   subtest("test_clask_read_request_invalid_content_length", test_clask_read_request_invalid_content_length);
+  subtest("test_clask_read_request_conflicting_content_length", test_clask_read_request_conflicting_content_length);
   subtest("test_clask_read_request_content_length_bounds_body", test_clask_read_request_content_length_bounds_body);
   subtest("test_clask_serve_file_if_modified_since", test_clask_serve_file_if_modified_since);
   subtest("test_clask_sse_writer_output", test_clask_sse_writer_output);
