@@ -1165,13 +1165,18 @@ inline std::string request::cookie_value(const std::string& name) {
       for (auto&& elem : elems) {
         auto v = elem;
         trim_string(v);
-        auto toks = split_string(v, '=');
-        if (toks.size() == 2 && toks[0] == name) {
-          value = toks[1];
+        auto eq = v.find('=');
+        if (eq == std::string::npos) {
+          continue;
+        }
+        auto key = v.substr(0, eq);
+        auto val = v.substr(eq + 1);
+        if (key == name) {
+          value = val;
           found = true;
         }
-        if (toks.size() == 2 && toks[0] == "path") {
-          path = toks[1];
+        if (key == "path") {
+          path = val;
         }
       }
       if (found) {

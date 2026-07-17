@@ -302,6 +302,19 @@ void test_clask_request_cookie_value() {
         "");
     _ok(req.cookie_value("session") == "", R"(req.cookie_value("session") == "")");
   }
+  {
+    clask::request req(
+        "GET",
+        "/",
+        "/",
+        {},
+        {
+          { "Cookie", "token=YWJjZGVmZw==; session=a1b2" },
+        },
+        "");
+    _ok(req.cookie_value("token") == "YWJjZGVmZw==", R"(req.cookie_value("token") == "YWJjZGVmZw==")");
+    _ok(req.cookie_value("session") == "a1b2", R"(req.cookie_value("session") == "a1b2")");
+  }
 }
 
 void test_clask_request_uri_param() {
