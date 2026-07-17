@@ -900,7 +900,7 @@ static std::unordered_map<std::string, std::string> content_types = {
   { ".txt",  "text/plain; charset=utf-8" },
   { ".html", "text/html; charset=utf-8" },
   { ".js",   "text/javascript" },
-  { ".json", "text/json" },
+  { ".json", "application/json" },
   { ".png",  "image/png" },
   { ".jpg",  "image/jpeg" },
   { ".jpeg", "image/jpeg" },
@@ -1798,7 +1798,7 @@ inline void serve_dir(response_writer& resp, request& req, const std::string& pa
   for (const auto& e : std::filesystem::directory_iterator(wpath)) {
     auto fn = e.path().filename().string();
     if (e.is_directory()) fn += "/";
-    os << "<a href=\"" << url_encode(fn, false) << "\">" << html_encode(fn) << "</a></br>\n";
+    os << "<a href=\"" << url_encode(fn, false) << "\">" << html_encode(fn) << "</a><br>\n";
     resp.write(os.str());
     os.str("");
     os.clear(std::stringstream::goodbit);
