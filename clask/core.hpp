@@ -979,6 +979,11 @@ inline void write_status_text_response(
   write_plain_text_response(resp, code, status_codes[code]);
 }
 
+inline std::string form_url_decode(std::string s) {
+  std::replace(s.begin(), s.end(), '+', ' ');
+  return url_decode(s);
+}
+
 inline std::unordered_map<std::string, std::string> params(const std::string& s) {
   std::unordered_map<std::string, std::string> ret;
   std::istringstream iss(s);
@@ -986,7 +991,7 @@ inline std::unordered_map<std::string, std::string> params(const std::string& s)
   while(std::getline(iss, keyval, '&')) {
     std::istringstream isk(keyval);
     if(std::getline(std::getline(isk, key, '='), val)) {
-      ret[url_decode(key)] = url_decode(val);
+      ret[form_url_decode(key)] = form_url_decode(val);
     }
   }
   return ret;
@@ -1298,7 +1303,7 @@ inline request_read_result read_request_from_socket(int s) {
     while (std::getline(iss, keyval, '&')) {
       std::istringstream isk(keyval);
       if(std::getline(std::getline(isk, key, '='), val)) {
-        req_uri_params[url_decode(key)] = url_decode(val);
+        req_uri_params[form_url_decode(key)] = form_url_decode(val);
       }
     }
   }
