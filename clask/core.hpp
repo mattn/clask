@@ -1833,7 +1833,9 @@ inline void serve_file(response_writer& resp, request& req, const std::string& p
       std::istringstream ss(h.second);
       ss >> std::get_time(&file_gmt, "%a, %d %b %Y %H:%M:%S");
       if (!ss.fail() && std::mktime(gmt) <= std::mktime(&file_gmt)) {
-        write_status_text_response(resp, 304);
+        resp.clear_header();
+        resp.code = 304;
+        resp.write_headers();
         return;
       }
       break;
