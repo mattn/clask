@@ -826,6 +826,74 @@ void test_clask_response_writer_end_keeps_socket_open() {
   closesocket(fds[1]);
 }
 
+static std::string run_static_handler(clask::server_t& s, const std::string& uri) {
+  int fds[2];
+  if (!make_socket_pair(fds)) {
+    return "";
+  }
+  s.test_match("GET", uri, [&](const clask::func_t& fn, const std::vector<std::string>& args) {
+    clask::response_writer resp(fds[1], 200);
+    clask::request req("GET", uri, uri, {}, {}, "");
+    req.args = args;
+    fn.f_writer(resp, req);
+  });
+  closesocket(fds[1]);
+  std::string out;
+  char buf[4096];
+  ssize_t n;
+  while ((n = recv(fds[0], buf, sizeof(buf), 0)) > 0) {
+    out.append(buf, (size_t) n);
+  }
+  closesocket(fds[0]);
+  return out;
+}
+
+void test_clask_static_dir_custom_404_page() {
+  const std::string dir = "./test_404_public";
+  std::filesystem::create_directory(dir);
+  {
+    std::ofstream ofs(dir + "/404.html", std::ios::binary);
+    ofs << "<h1>custom not found</h1>";
+  }
+  {
+    std::ofstream ofs(dir + "/hello.txt", std::ios::binary);
+    ofs << "hi";
+  }
+
+  auto s = clask::server();
+  s.static_dir("/", dir);
+
+  {
+    auto out = run_static_handler(s, "/missing.txt");
+    _ok(out.find("HTTP/1.1 404") == 0, R"(out.find("HTTP/1.1 404") == 0)");
+    _ok(
+        out.find("<h1>custom not found</h1>") != std::string::npos,
+        R"(out.find("<h1>custom not found</h1>") != std::string::npos)");
+    _ok(out.find("text/html") != std::string::npos, R"(out.find("text/html") != std::string::npos)");
+  }
+  {
+    auto out = run_static_handler(s, "/hello.txt");
+    _ok(out.find("HTTP/1.1 200") == 0, R"(out.find("HTTP/1.1 200") == 0)");
+    _ok(out.find("\r\n\r\nhi") != std::string::npos, R"(out.find("\r\n\r\nhi") != std::string::npos)");
+  }
+
+  std::filesystem::remove_all(dir);
+}
+
+void test_clask_static_dir_plain_404_without_page() {
+  const std::string dir = "./test_404_plain";
+  std::filesystem::create_directory(dir);
+
+  auto s = clask::server();
+  s.static_dir("/", dir);
+
+  auto out = run_static_handler(s, "/missing.txt");
+  _ok(out.find("HTTP/1.1 404") == 0, R"(out.find("HTTP/1.1 404") == 0)");
+  _ok(out.find("Not Found") != std::string::npos, R"(out.find("Not Found") != std::string::npos)");
+
+  std::filesystem::remove_all(dir);
+}
+
 void test_clask_parent_reference_guard() {
   _ok(clask::contains_parent_reference("../secret") == true, R"(clask::contains_parent_reference("../secret") == true)");
   _ok(clask::contains_parent_reference("safe/path") == false, R"(clask::contains_parent_reference("safe/path") == false)");
@@ -979,6 +1047,8 @@ int main() {
   subtest("test_clask_serve_file_if_modified_since", test_clask_serve_file_if_modified_since);
   subtest("test_clask_sse_writer_output", test_clask_sse_writer_output);
   subtest("test_clask_response_writer_end_keeps_socket_open", test_clask_response_writer_end_keeps_socket_open);
+  subtest("test_clask_static_dir_custom_404_page", test_clask_static_dir_custom_404_page);
+  subtest("test_clask_static_dir_plain_404_without_page", test_clask_static_dir_plain_404_without_page);
   subtest("test_clask_parent_reference_guard", test_clask_parent_reference_guard);
   subtest("test_clask_accept_failure_does_not_throw", test_clask_accept_failure_does_not_throw);
   subtest("test_clask_server_runtime_helpers", test_clask_server_runtime_helpers);
