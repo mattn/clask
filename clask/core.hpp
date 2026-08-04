@@ -1852,6 +1852,32 @@ inline void serve_file(response_writer& resp, request& req, const std::string& p
   }
 }
 
+inline void serve_not_found(response_writer& resp, const std::string& dir) {
+  auto page = dir + "/404.html";
+  auto wpath = to_wstring(page);
+  std::filesystem::path fspath(wpath.c_str());
+  std::error_code ec;
+  if (!std::filesystem::is_regular_file(fspath, ec)) {
+    write_status_text_response(resp, 404);
+    return;
+  }
+  std::ifstream is(fspath, std::ios::in | std::ios::binary);
+  if (is.fail()) {
+    write_status_text_response(resp, 404);
+    return;
+  }
+  resp.code = 404;
+  resp.set_header("content-type", "text/html; charset=utf-8");
+  auto size = std::filesystem::file_size(fspath, ec);
+  if (!ec) {
+    resp.set_header("content-length", std::to_string(size));
+  }
+  char buf[BUFSIZ];
+  while (!is.eof()) {
+    resp.write(buf, (size_t) is.read(buf, sizeof(buf)).gcount());
+  }
+}
+
 inline void server_t::static_dir(const std::string& path, const std::string& dir, bool listing) {
   register_route(route_method::get, path, [&](func_t& func) {
     func.prefix_match = true;
@@ -1875,6 +1901,12 @@ inline void server_t::static_dir(const std::string& path, const std::string& dir
         req_path += "index.html";
       }
 
+      std::error_code ec;
+      auto wpath = to_wstring(req_path);
+      if (!std::filesystem::is_regular_file(std::filesystem::path(wpath.c_str()), ec)) {
+        serve_not_found(resp, dir);
+        return;
+      }
       serve_file(resp, req, req_path);
     };
   });
