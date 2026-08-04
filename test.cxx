@@ -850,15 +850,17 @@ static std::string run_static_handler(clask::server_t& s, const std::string& uri
 
 void test_clask_static_dir_custom_404_page() {
   const std::string dir = "./test_404_public";
+  const std::string custom_not_found = "<h1>custom not found</h1>";
   std::filesystem::create_directory(dir);
   {
     std::ofstream ofs(dir + "/404.html", std::ios::binary);
-    ofs << "<h1>custom not found</h1>";
+    ofs << custom_not_found;
   }
   {
     std::ofstream ofs(dir + "/hello.txt", std::ios::binary);
     ofs << "hi";
   }
+  std::filesystem::create_directory(dir + "/subdir");
 
   auto s = clask::server();
   s.static_dir("/", dir);
@@ -867,9 +869,19 @@ void test_clask_static_dir_custom_404_page() {
     auto out = run_static_handler(s, "/missing.txt");
     _ok(out.find("HTTP/1.1 404") == 0, R"(out.find("HTTP/1.1 404") == 0)");
     _ok(
-        out.find("<h1>custom not found</h1>") != std::string::npos,
-        R"(out.find("<h1>custom not found</h1>") != std::string::npos)");
+        out.find(custom_not_found) != std::string::npos,
+        R"(out.find(custom_not_found) != std::string::npos)");
     _ok(out.find("text/html") != std::string::npos, R"(out.find("text/html") != std::string::npos)");
+    _ok(
+        out.find("Content-Length: " + std::to_string(custom_not_found.size()) + "\r\n") != std::string::npos,
+        R"(out contains Content-Length of 404.html)");
+  }
+  {
+    auto out = run_static_handler(s, "/subdir");
+    _ok(out.find("HTTP/1.1 404") == 0, R"(out.find("HTTP/1.1 404") == 0)");
+    _ok(
+        out.find(custom_not_found) != std::string::npos,
+        R"(out.find(custom_not_found) != std::string::npos)");
   }
   {
     auto out = run_static_handler(s, "/hello.txt");
