@@ -754,6 +754,9 @@ void test_clask_serve_file_if_modified_since() {
     _ok(
         out.size() >= 4 && out.compare(out.size() - 4, 4, "\r\n\r\n") == 0,
         R"(304 response has no body)");
+    _ok(
+        out.find("Cache-Control: no-cache\r\n") != std::string::npos,
+        R"(304 has Cache-Control: no-cache)");
   }
   {
     auto out = serve_file_with_header(path, "Mon, 01 Jan 1990 00:00:00 GMT");
@@ -764,6 +767,9 @@ void test_clask_serve_file_if_modified_since() {
     auto out = serve_file_with_header(path, "");
     _ok(out.find("HTTP/1.1 200") == 0, R"(out.find("HTTP/1.1 200") == 0)");
     _ok(out.find("\r\n\r\nhello") != std::string::npos, R"(out.find("\r\n\r\nhello") != std::string::npos)");
+    _ok(
+        out.find("Cache-Control: no-cache\r\n") != std::string::npos,
+        R"(200 has Cache-Control: no-cache)");
   }
 
   remove(path.c_str());

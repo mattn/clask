@@ -1821,6 +1821,11 @@ inline void serve_file(response_writer& resp, request& req, const std::string& p
     resp.set_header("content-type", it->second);
   }
 
+  // without an explicit policy browsers apply heuristic caching to
+  // responses that carry Last-Modified and may reuse stale content
+  // without revalidating; no-cache keeps them revalidating (cheap 304s)
+  resp.set_header("cache-control", "no-cache");
+
   std::uintmax_t size = std::filesystem::file_size(fspath);
   resp.set_header("content-length", std::to_string(size));
 
@@ -1834,6 +1839,7 @@ inline void serve_file(response_writer& resp, request& req, const std::string& p
       ss >> std::get_time(&file_gmt, "%a, %d %b %Y %H:%M:%S");
       if (!ss.fail() && std::mktime(gmt) <= std::mktime(&file_gmt)) {
         resp.clear_header();
+        resp.set_header("cache-control", "no-cache");
         resp.code = 304;
         resp.write_headers();
         return;
