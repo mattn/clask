@@ -718,7 +718,8 @@ void test_clask_read_request_content_length_bounds_body() {
 
 static std::string serve_file_with_header(
     const std::string& path,
-    const std::string& if_modified_since) {
+    const std::string& if_modified_since,
+    const std::vector<clask::header>& extra_headers = {}) {
   int fds[2];
   if (!make_socket_pair(fds)) {
     return "";
@@ -729,7 +730,7 @@ static std::string serve_file_with_header(
     headers.emplace_back("If-Modified-Since", if_modified_since);
   }
   clask::request req("GET", "/f.txt", "/f.txt", {}, headers, "");
-  clask::serve_file(resp, req, path);
+  clask::serve_file(resp, req, path, extra_headers);
   closesocket(fds[1]);
   std::string out;
   char buf[4096];
@@ -754,9 +755,6 @@ void test_clask_serve_file_if_modified_since() {
     _ok(
         out.size() >= 4 && out.compare(out.size() - 4, 4, "\r\n\r\n") == 0,
         R"(304 response has no body)");
-    _ok(
-        out.find("Cache-Control: no-cache\r\n") != std::string::npos,
-        R"(304 has Cache-Control: no-cache)");
   }
   {
     auto out = serve_file_with_header(path, "Mon, 01 Jan 1990 00:00:00 GMT");
@@ -768,8 +766,8 @@ void test_clask_serve_file_if_modified_since() {
     _ok(out.find("HTTP/1.1 200") == 0, R"(out.find("HTTP/1.1 200") == 0)");
     _ok(out.find("\r\n\r\nhello") != std::string::npos, R"(out.find("\r\n\r\nhello") != std::string::npos)");
     _ok(
-        out.find("Cache-Control: no-cache\r\n") != std::string::npos,
-        R"(200 has Cache-Control: no-cache)");
+        out.find("Cache-Control:") == std::string::npos,
+        R"(no Cache-Control unless configured)");
   }
 
   remove(path.c_str());
@@ -909,6 +907,45 @@ void test_clask_static_dir_plain_404_without_page() {
   _ok(out.find("HTTP/1.1 404") == 0, R"(out.find("HTTP/1.1 404") == 0)");
   _ok(out.find("Not Found") != std::string::npos, R"(out.find("Not Found") != std::string::npos)");
 
+  std::filesystem::remove_all(dir);
+}
+
+void test_clask_static_extra_headers() {
+  const std::string path = "./test_extra_headers.txt";
+  {
+    std::ofstream ofs(path, std::ios::binary);
+    ofs << "hello";
+  }
+
+  {
+    auto out = serve_file_with_header(path, "", {{"Cache-Control", "no-cache"}});
+    _ok(out.find("HTTP/1.1 200") == 0, R"(out.find("HTTP/1.1 200") == 0)");
+    _ok(
+        out.find("Cache-Control: no-cache\r\n") != std::string::npos,
+        R"(200 has configured Cache-Control)");
+  }
+  {
+    auto out = serve_file_with_header(path, "Fri, 01 Jan 2100 00:00:00 GMT", {{"Cache-Control", "no-cache"}});
+    _ok(out.find("HTTP/1.1 304") == 0, R"(out.find("HTTP/1.1 304") == 0)");
+    _ok(
+        out.find("Cache-Control: no-cache\r\n") != std::string::npos,
+        R"(304 has configured Cache-Control)");
+  }
+  remove(path.c_str());
+
+  const std::string dir = "./test_extra_headers_dir";
+  std::filesystem::create_directory(dir);
+  {
+    std::ofstream ofs(dir + "/404.html", std::ios::binary);
+    ofs << "nope";
+  }
+  auto s = clask::server();
+  s.static_dir("/", dir, false, {{"Cache-Control", "no-cache"}});
+  auto out = run_static_handler(s, "/missing.txt");
+  _ok(out.find("HTTP/1.1 404") == 0, R"(out.find("HTTP/1.1 404") == 0)");
+  _ok(
+      out.find("Cache-Control: no-cache\r\n") != std::string::npos,
+      R"(404 page has configured Cache-Control)");
   std::filesystem::remove_all(dir);
 }
 
@@ -1067,6 +1104,7 @@ int main() {
   subtest("test_clask_response_writer_end_keeps_socket_open", test_clask_response_writer_end_keeps_socket_open);
   subtest("test_clask_static_dir_custom_404_page", test_clask_static_dir_custom_404_page);
   subtest("test_clask_static_dir_plain_404_without_page", test_clask_static_dir_plain_404_without_page);
+  subtest("test_clask_static_extra_headers", test_clask_static_extra_headers);
   subtest("test_clask_parent_reference_guard", test_clask_parent_reference_guard);
   subtest("test_clask_accept_failure_does_not_throw", test_clask_accept_failure_does_not_throw);
   subtest("test_clask_server_runtime_helpers", test_clask_server_runtime_helpers);
