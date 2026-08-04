@@ -969,17 +969,22 @@ public:
 inline void write_plain_text_response(
     response_writer& resp,
     int code,
-    const std::string& body) {
+    const std::string& body,
+    const std::vector<header>& extra_headers = {}) {
   resp.clear_header();
   resp.code = code;
   resp.set_header("content-type", "text/plain");
+  for (const auto& h : extra_headers) {
+    resp.set_header(h.first, h.second);
+  }
   resp.write(body);
 }
 
 inline void write_status_text_response(
     response_writer& resp,
-    int code) {
-  write_plain_text_response(resp, code, status_codes[code]);
+    int code,
+    const std::vector<header>& extra_headers = {}) {
+  write_plain_text_response(resp, code, status_codes[code], extra_headers);
 }
 
 inline std::string form_url_decode(std::string s) {
@@ -1827,7 +1832,7 @@ inline void serve_file(
 
   std::ifstream is(fspath, std::ios::in | std::ios::binary);
   if (is.fail()) {
-    write_status_text_response(resp, 404);
+    write_status_text_response(resp, 404, extra_headers);
     return;
   }
 
@@ -1882,12 +1887,12 @@ inline void serve_not_found(
   std::filesystem::path fspath(wpath.c_str());
   std::error_code ec;
   if (!std::filesystem::is_regular_file(fspath, ec)) {
-    write_status_text_response(resp, 404);
+    write_status_text_response(resp, 404, extra_headers);
     return;
   }
   std::ifstream is(fspath, std::ios::in | std::ios::binary);
   if (is.fail()) {
-    write_status_text_response(resp, 404);
+    write_status_text_response(resp, 404, extra_headers);
     return;
   }
   resp.code = 404;
@@ -1915,11 +1920,11 @@ inline void server_t::static_dir(
     func.f_writer = [path, dir, listing, extra_headers](response_writer& resp, request& req) {
       auto resolved = resolve_static_path(req.uri, path, dir);
       if (resolved.forbidden) {
-        write_status_text_response(resp, 403);
+        write_status_text_response(resp, 403, extra_headers);
         return;
       }
       if (!resolved.matched) {
-        write_status_text_response(resp, 404);
+        write_status_text_response(resp, 404, extra_headers);
         return;
       }
 

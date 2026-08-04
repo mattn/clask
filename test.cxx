@@ -947,6 +947,18 @@ void test_clask_static_extra_headers() {
       out.find("Cache-Control: no-cache\r\n") != std::string::npos,
       R"(404 page has configured Cache-Control)");
   std::filesystem::remove_all(dir);
+
+  // plain 404 (no 404.html present) keeps the configured headers too
+  const std::string plain_dir = "./test_extra_headers_plain";
+  std::filesystem::create_directory(plain_dir);
+  auto s2 = clask::server();
+  s2.static_dir("/", plain_dir, false, {{"Cache-Control", "no-cache"}});
+  auto out2 = run_static_handler(s2, "/missing.txt");
+  _ok(out2.find("HTTP/1.1 404") == 0, R"(out2.find("HTTP/1.1 404") == 0)");
+  _ok(
+      out2.find("Cache-Control: no-cache\r\n") != std::string::npos,
+      R"(plain 404 has configured Cache-Control)");
+  std::filesystem::remove_all(plain_dir);
 }
 
 void test_clask_parent_reference_guard() {
