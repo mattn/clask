@@ -969,17 +969,22 @@ public:
 inline void write_plain_text_response(
     response_writer& resp,
     int code,
-    const std::string& body) {
+    const std::string& body,
+    const std::vector<header>& extra_headers = {}) {
   resp.clear_header();
   resp.code = code;
   resp.set_header("content-type", "text/plain");
+  for (const auto& h : extra_headers) {
+    resp.set_header(h.first, h.second);
+  }
   resp.write(body);
 }
 
 inline void write_status_text_response(
     response_writer& resp,
-    int code) {
-  write_plain_text_response(resp, code, status_codes[code]);
+    int code,
+    const std::vector<header>& extra_headers = {}) {
+  write_plain_text_response(resp, code, status_codes[code], extra_headers);
 }
 
 inline std::string form_url_decode(std::string s) {
@@ -1545,7 +1550,11 @@ void QUERY(const std::string&, const functor_ ## name);
   CLASK_DEFINE_REQUEST(string)
   CLASK_DEFINE_REQUEST(response)
 #undef CLASK_DEFINE_REQUEST
-  void static_dir(const std::string&, const std::string&, bool listing = false);
+  void static_dir(
+      const std::string&,
+      const std::string&,
+      bool listing = false,
+      const std::vector<header>& extra_headers = {});
   server_t& worker_count(unsigned int) &;
   server_t&& worker_count(unsigned int) &&;
   server_t& accept_queue_limit(size_t) &;
@@ -1782,11 +1791,18 @@ CLASK_DEFINE_REQUEST(response)
 
 #undef CLASK_DEFINE_REQUEST
 
-inline void serve_dir(response_writer& resp, request& req, const std::string& path) {
+inline void serve_dir(
+    response_writer& resp,
+    request& req,
+    const std::string& path,
+    const std::vector<header>& extra_headers = {}) {
   auto wpath = to_wstring(path);
 
   resp.code = 200;
   resp.set_header("content-type", "text/html; charset=utf-8");
+  for (const auto& h : extra_headers) {
+    resp.set_header(h.first, h.second);
+  }
   std::ostringstream os;
   os << "<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"UTF-8\">\n<title>";
   os << html_encode(req.uri);
@@ -1806,19 +1822,26 @@ inline void serve_dir(response_writer& resp, request& req, const std::string& pa
   resp.write("</body>\n</html>\n");
 }
 
-inline void serve_file(response_writer& resp, request& req, const std::string& path) {
+inline void serve_file(
+    response_writer& resp,
+    request& req,
+    const std::string& path,
+    const std::vector<header>& extra_headers = {}) {
   auto wpath = to_wstring(path);
   std::filesystem::path fspath(wpath.c_str());
 
   std::ifstream is(fspath, std::ios::in | std::ios::binary);
   if (is.fail()) {
-    write_status_text_response(resp, 404);
+    write_status_text_response(resp, 404, extra_headers);
     return;
   }
 
   auto it = content_types.find(fspath.extension().string());
   if (it != content_types.end()) {
     resp.set_header("content-type", it->second);
+  }
+  for (const auto& h : extra_headers) {
+    resp.set_header(h.first, h.second);
   }
 
   std::uintmax_t size = std::filesystem::file_size(fspath);
@@ -1834,6 +1857,9 @@ inline void serve_file(response_writer& resp, request& req, const std::string& p
       ss >> std::get_time(&file_gmt, "%a, %d %b %Y %H:%M:%S");
       if (!ss.fail() && std::mktime(gmt) <= std::mktime(&file_gmt)) {
         resp.clear_header();
+        for (const auto& h : extra_headers) {
+          resp.set_header(h.first, h.second);
+        }
         resp.code = 304;
         resp.write_headers();
         return;
@@ -1852,22 +1878,28 @@ inline void serve_file(response_writer& resp, request& req, const std::string& p
   }
 }
 
-inline void serve_not_found(response_writer& resp, const std::string& dir) {
+inline void serve_not_found(
+    response_writer& resp,
+    const std::string& dir,
+    const std::vector<header>& extra_headers = {}) {
   auto page = dir + "/404.html";
   auto wpath = to_wstring(page);
   std::filesystem::path fspath(wpath.c_str());
   std::error_code ec;
   if (!std::filesystem::is_regular_file(fspath, ec)) {
-    write_status_text_response(resp, 404);
+    write_status_text_response(resp, 404, extra_headers);
     return;
   }
   std::ifstream is(fspath, std::ios::in | std::ios::binary);
   if (is.fail()) {
-    write_status_text_response(resp, 404);
+    write_status_text_response(resp, 404, extra_headers);
     return;
   }
   resp.code = 404;
   resp.set_header("content-type", "text/html; charset=utf-8");
+  for (const auto& h : extra_headers) {
+    resp.set_header(h.first, h.second);
+  }
   auto size = std::filesystem::file_size(fspath, ec);
   if (!ec) {
     resp.set_header("content-length", std::to_string(size));
@@ -1878,24 +1910,28 @@ inline void serve_not_found(response_writer& resp, const std::string& dir) {
   }
 }
 
-inline void server_t::static_dir(const std::string& path, const std::string& dir, bool listing) {
+inline void server_t::static_dir(
+    const std::string& path,
+    const std::string& dir,
+    bool listing,
+    const std::vector<header>& extra_headers) {
   register_route(route_method::get, path, [&](func_t& func) {
     func.prefix_match = true;
-    func.f_writer = [path, dir, listing](response_writer& resp, request& req) {
+    func.f_writer = [path, dir, listing, extra_headers](response_writer& resp, request& req) {
       auto resolved = resolve_static_path(req.uri, path, dir);
       if (resolved.forbidden) {
-        write_status_text_response(resp, 403);
+        write_status_text_response(resp, 403, extra_headers);
         return;
       }
       if (!resolved.matched) {
-        write_status_text_response(resp, 404);
+        write_status_text_response(resp, 404, extra_headers);
         return;
       }
 
       auto req_path = std::move(resolved.path);
       if (!req_path.empty() && req_path[req_path.size() - 1] == '/') {
         if (listing) {
-          serve_dir(resp, req, req_path);
+          serve_dir(resp, req, req_path, extra_headers);
           return;
         }
         req_path += "index.html";
@@ -1904,10 +1940,10 @@ inline void server_t::static_dir(const std::string& path, const std::string& dir
       std::error_code ec;
       auto wpath = to_wstring(req_path);
       if (!std::filesystem::is_regular_file(std::filesystem::path(wpath.c_str()), ec)) {
-        serve_not_found(resp, dir);
+        serve_not_found(resp, dir, extra_headers);
         return;
       }
-      serve_file(resp, req, req_path);
+      serve_file(resp, req, req_path, extra_headers);
     };
   });
 }
