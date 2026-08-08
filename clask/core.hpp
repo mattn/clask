@@ -338,7 +338,7 @@ inline path_segment parse_path_segment(const std::string& path, size_t offset) {
 }
 
 inline std::optional<route_method> parse_route_method(const std::string& method) {
-  if (method == "GET") {
+  if (method == "GET" || method == "HEAD") {
     return route_method::get;
   }
   if (method == "POST") {
@@ -522,13 +522,17 @@ inline void send_text_response(
     int code,
     const std::string& reason,
     const std::string& body,
-    bool keep_alive) {
+    bool keep_alive,
+    bool head_only = false) {
   std::ostringstream os;
   os << "HTTP/1.1 " << code << " " << reason
      << "\r\nContent-Type: text/plain\r\nConnection: "
      << (keep_alive ? "Keep-Alive" : "Close")
      << "\r\nContent-Length: " << body.size()
-     << "\r\n\r\n" << body;
+     << "\r\n\r\n";
+  if (!head_only) {
+    os << body;
+  }
   send(s, os.str().data(), (int) os.str().size(), MSG_NOSIGNAL);
 }
 
@@ -892,8 +896,9 @@ static std::unordered_map<int, std::string> status_codes = {
 inline void send_status_text_response(
     int s,
     int code,
-    bool keep_alive) {
-  send_text_response(s, code, status_codes[code], status_codes[code], keep_alive);
+    bool keep_alive,
+    bool head_only = false) {
+  send_text_response(s, code, status_codes[code], status_codes[code], keep_alive, head_only);
 }
 
 static std::unordered_map<std::string, std::string> content_types = {
@@ -919,6 +924,8 @@ private:
 public:
   response_writer(int s, int code) : s(s), header_out(false), code(code) { }
   int code;
+  // HEAD requests send the same headers as GET but no body.
+  bool head_only = false;
   void set_header(std::string, const std::string&);
   void clear_header();
   virtual void write(const std::string&);
@@ -1026,6 +1033,9 @@ inline void response_writer::write(char* buf, size_t n) {
   if (!header_out) {
     write_headers();
   }
+  if (head_only) {
+    return;
+  }
   send(s, buf, (int) n, MSG_NOSIGNAL);
 }
 
@@ -1051,6 +1061,9 @@ inline void response_writer::write_headers() {
 inline void response_writer::write(const std::string& content) {
   if (!header_out) {
     write_headers();
+  }
+  if (head_only) {
+    return;
   }
   send(s, content.data(), (int) content.size(), MSG_NOSIGNAL);
 }
@@ -1388,6 +1401,7 @@ typedef struct _func_t {
 
 inline int func_t::handle(int s, request& req, bool& keep_alive) const {
   int code = 200;
+  const auto head_only = req.method == "HEAD";
   if (f_string != nullptr) {
     auto res = f_string(req);
     std::string hdr;
@@ -1397,10 +1411,13 @@ inline int func_t::handle(int s, request& req, bool& keep_alive) const {
     hdr += "\r\nContent-Length: ";
     hdr += std::to_string(res.size());
     hdr += "\r\n\r\n";
-    hdr += res;
+    if (!head_only) {
+      hdr += res;
+    }
     send(s, hdr.data(), (int) hdr.size(), MSG_NOSIGNAL);
   } else if (f_writer != nullptr) {
     response_writer writer(s, 200);
+    writer.head_only = head_only;
     writer.set_header("Connection", "Close");
     f_writer(writer, req);
     keep_alive = false;
@@ -1434,7 +1451,9 @@ inline int func_t::handle(int s, request& req, bool& keep_alive) const {
     hdr += "Content-Length: ";
     hdr += std::to_string(res.content.size());
     hdr += "\r\n\r\n";
-    hdr += res.content;
+    if (!head_only) {
+      hdr += res.content;
+    }
     send(s, hdr.data(), (int) hdr.size(), MSG_NOSIGNAL);
     code = res.code;
   }
@@ -1461,13 +1480,13 @@ inline bool dispatch_request(
       CLASK_LOG(clask::log_level::WARN) << remote << " " << code << " " << req.method << " " << req.uri;
 #endif
       keep_alive = false;
-      send_status_text_response(s, 500, keep_alive);
+      send_status_text_response(s, 500, keep_alive, req.method == "HEAD");
     }
   })) {
 #ifndef CLASK_DISABLE_LOGS
     CLASK_LOG(clask::log_level::WARN) << remote << " " << 404 << " " << req.method << " " << req.uri;
 #endif
-    send_status_text_response(s, 404, keep_alive);
+    send_status_text_response(s, 404, keep_alive, req.method == "HEAD");
   }
   return keep_alive;
 }
