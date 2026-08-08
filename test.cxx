@@ -789,6 +789,55 @@ void test_clask_serve_file_csv_content_type() {
   remove(path.c_str());
 }
 
+void test_clask_head_route_match() {
+  auto s = clask::server();
+  s.GET("/hello", [](clask::request&) -> std::string {
+    return "hello";
+  });
+
+  auto matched = s.test_match("HEAD", "/hello", [&](const clask::func_t& /*fn*/, const std::vector<std::string>& args) {
+    _ok(args.empty() == true, R"(args.empty() == true)");
+  });
+  _ok(matched == true, R"(matched == true)");
+
+  auto miss = s.test_match("HEAD", "/nothing", [&](const clask::func_t& /*fn*/, const std::vector<std::string>& /*args*/) {
+  });
+  _ok(miss == false, R"(miss == false)");
+}
+
+void test_clask_serve_file_head_request() {
+  const std::string path = "./test_head_request.txt";
+  {
+    std::ofstream ofs(path, std::ios::binary);
+    ofs << "hello";
+  }
+
+  int fds[2];
+  _ok(make_socket_pair(fds) == true, R"(make_socket_pair(fds) == true)");
+  clask::response_writer resp(fds[1], 200);
+  resp.head_only = true;
+  clask::request req("HEAD", "/f.txt", "/f.txt", {}, {}, "");
+  clask::serve_file(resp, req, path);
+  closesocket(fds[1]);
+  std::string out;
+  char buf[4096];
+  ssize_t n;
+  while ((n = recv(fds[0], buf, sizeof(buf), 0)) > 0) {
+    out.append(buf, (size_t) n);
+  }
+  closesocket(fds[0]);
+
+  _ok(out.find("HTTP/1.1 200") == 0, R"(out.find("HTTP/1.1 200") == 0)");
+  _ok(
+      out.find("Content-Length: 5\r\n") != std::string::npos,
+      R"(HEAD response keeps Content-Length of the body)");
+  _ok(
+      out.size() >= 4 && out.compare(out.size() - 4, 4, "\r\n\r\n") == 0,
+      R"(HEAD response has no body)");
+
+  remove(path.c_str());
+}
+
 void test_clask_sse_writer_output() {
   int fds[2];
   _ok(make_socket_pair(fds) == true, R"(make_socket_pair(fds) == true)");
@@ -1129,6 +1178,8 @@ int main() {
   subtest("test_clask_read_request_content_length_bounds_body", test_clask_read_request_content_length_bounds_body);
   subtest("test_clask_serve_file_if_modified_since", test_clask_serve_file_if_modified_since);
   subtest("test_clask_serve_file_csv_content_type", test_clask_serve_file_csv_content_type);
+  subtest("test_clask_head_route_match", test_clask_head_route_match);
+  subtest("test_clask_serve_file_head_request", test_clask_serve_file_head_request);
   subtest("test_clask_sse_writer_output", test_clask_sse_writer_output);
   subtest("test_clask_response_writer_end_keeps_socket_open", test_clask_response_writer_end_keeps_socket_open);
   subtest("test_clask_static_dir_custom_404_page", test_clask_static_dir_custom_404_page);
