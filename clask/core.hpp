@@ -901,6 +901,8 @@ static std::unordered_map<std::string, std::string> content_types = {
   { ".html", "text/html; charset=utf-8" },
   { ".js",   "text/javascript" },
   { ".json", "application/json" },
+  { ".csv",  "text/csv; charset=utf-8" },
+  { ".tsv",  "text/tab-separated-values; charset=utf-8" },
   { ".png",  "image/png" },
   { ".jpg",  "image/jpeg" },
   { ".jpeg", "image/jpeg" },
