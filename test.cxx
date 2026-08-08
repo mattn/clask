@@ -773,6 +773,22 @@ void test_clask_serve_file_if_modified_since() {
   remove(path.c_str());
 }
 
+void test_clask_serve_file_csv_content_type() {
+  const std::string path = "./test_content_type.csv";
+  {
+    std::ofstream ofs(path, std::ios::binary);
+    ofs << "a,b\n1,2\n";
+  }
+
+  auto out = serve_file_with_header(path, "");
+  _ok(out.find("HTTP/1.1 200") == 0, R"(out.find("HTTP/1.1 200") == 0)");
+  _ok(
+      out.find("Content-Type: text/csv; charset=utf-8\r\n") != std::string::npos,
+      R"(csv served with text/csv; charset=utf-8)");
+
+  remove(path.c_str());
+}
+
 void test_clask_sse_writer_output() {
   int fds[2];
   _ok(make_socket_pair(fds) == true, R"(make_socket_pair(fds) == true)");
@@ -1112,6 +1128,7 @@ int main() {
   subtest("test_clask_read_request_conflicting_content_length", test_clask_read_request_conflicting_content_length);
   subtest("test_clask_read_request_content_length_bounds_body", test_clask_read_request_content_length_bounds_body);
   subtest("test_clask_serve_file_if_modified_since", test_clask_serve_file_if_modified_since);
+  subtest("test_clask_serve_file_csv_content_type", test_clask_serve_file_csv_content_type);
   subtest("test_clask_sse_writer_output", test_clask_sse_writer_output);
   subtest("test_clask_response_writer_end_keeps_socket_open", test_clask_response_writer_end_keeps_socket_open);
   subtest("test_clask_static_dir_custom_404_page", test_clask_static_dir_custom_404_page);
