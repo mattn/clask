@@ -1176,6 +1176,7 @@ inline bool request::parse_multipart(std::vector<part>& parts) {
       auto key = std::string(hdrs[n].name, hdrs[n].name_len);
       auto val = std::string(hdrs[n].value, hdrs[n].value_len);
       key = url_decode(key);
+      camelize(key);
       val = url_decode(val);
       req_headers.emplace_back(std::move(key), std::move(val));
     }
