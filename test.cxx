@@ -262,6 +262,25 @@ void test_clask_request_parse_multipart6() {
   _ok(result == false, R"(result == false)");
 }
 
+void test_clask_multipart_header_case() {
+  for (const auto& disposition : {"content-disposition", "CONTENT-DISPOSITION", "cOnTeNt-DiSpOsItIoN"}) {
+    clask::request req("POST", "/", "/", {},
+        {{"Content-Type", "multipart/form-data; boundary=boundary"}},
+        std::string("--boundary\r\n") + disposition +
+        ": form-data; name=\"Upload\"; filename=\"Report.TXT\"\r\n"
+        "content-type: text/plain\r\n\r\nhello\r\n--boundary--\r\n");
+    std::vector<clask::part> parts;
+    _ok(req.parse_multipart(parts), "parse multipart with %s", disposition);
+    _ok(parts.size() == 1, "one upload part");
+    if (parts.size() == 1) {
+      _ok(parts[0].name() == "Upload", "field name is available and preserves case");
+      _ok(parts[0].filename() == "Report.TXT", "filename is available and preserves case");
+      _ok(parts[0].header_value("CONTENT-TYPE") == "text/plain", "part header lookup ignores case");
+      _ok(parts[0].body == "hello", "upload body is preserved");
+    }
+  }
+}
+
 void test_clask_part_unquoted_last_param() {
   {
     clask::part p;
@@ -1220,6 +1239,7 @@ int main() {
   subtest("test_clask_request_parse_multipart5", test_clask_request_parse_multipart5);
   subtest("test_clask_request_parse_multipart6", test_clask_request_parse_multipart6);
   subtest("test_clask_part_unquoted_last_param", test_clask_part_unquoted_last_param);
+  subtest("test_clask_multipart_header_case", test_clask_multipart_header_case);
   subtest("test_clask_to_wstring", test_clask_to_wstring);
   subtest("test_clask_trim_string", test_clask_trim_string);
   subtest("test_clask_url_encode", test_clask_url_encode);
