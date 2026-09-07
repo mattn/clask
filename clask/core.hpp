@@ -1329,6 +1329,7 @@ inline request_read_result read_request_from_socket(int s) {
   }
 
   bool keep_alive = minor_version == 1;
+  bool connection_close = false;
   bool has_content_length = false;
   size_t content_length = 0;
   for (size_t n = 0; n < num_headers; n++) {
@@ -1345,12 +1346,19 @@ inline request_read_result read_request_from_socket(int s) {
       has_content_length = true;
     } else if (key == "Connection") {
       for (auto& c : val) c = (char) std::tolower(static_cast<unsigned char>(c));
-      if (val == "keep-alive")
-        keep_alive = true;
-      else if (val == "close")
-        keep_alive = false;
+      for (auto token : split_string(val, ',')) {
+        trim_string(token, " \t");
+        if (token == "keep-alive")
+          keep_alive = true;
+        else if (token == "close")
+          connection_close = true;
+      }
     }
     req_headers.emplace_back(std::move(key), std::move(val));
+  }
+
+  if (connection_close) {
+    keep_alive = false;
   }
 
   if (has_content_length && buflen - pret < content_length) {

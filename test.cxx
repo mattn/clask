@@ -719,6 +719,42 @@ void test_clask_read_request_invalid_content_length() {
   closesocket(fds[1]);
 }
 
+void test_clask_connection_tokens() {
+  struct connection_case {
+    const char* version;
+    const char* headers;
+    bool keep_alive;
+  };
+  const connection_case cases[] = {
+    {"1.1", "Connection: keep-alive, close\r\n", false},
+    {"1.1", "Connection: Upgrade, ClOsE\r\n", false},
+    {"1.1", "Connection: close\r\nConnection: keep-alive\r\n", false},
+    {"1.1", "Connection: keep-alive\r\nConnection: close\r\n", false},
+    {"1.0", "Connection: Upgrade, Keep-Alive\r\n", true},
+    {"1.0", "Connection: close, keep-alive\r\n", false},
+    {"1.1", "Connection: x-close\r\n", true},
+    {"1.0", "Connection: x-keep-alive\r\n", false},
+    {"1.1", "", true},
+    {"1.0", "", false},
+  };
+  for (const auto& c : cases) {
+    int fds[2];
+    if (!make_socket_pair(fds)) {
+      _ok(false, "create socket pair");
+      return;
+    }
+    const auto wire = std::string("GET / HTTP/") + c.version +
+        "\r\nHost: localhost\r\n" + c.headers + "\r\n";
+    _ok(socket_write(fds[0], wire.data(), wire.size()) == (ssize_t) wire.size(), "write request");
+    shutdown(fds[0], SHUT_WR);
+    auto result = clask::read_request_from_socket(fds[1]);
+    _ok(result.ok, "read request with connection tokens");
+    _ok(result.keep_alive == c.keep_alive, "HTTP/%s %s", c.version, c.headers);
+    closesocket(fds[0]);
+    closesocket(fds[1]);
+  }
+}
+
 void test_clask_read_request_content_length_bounds_body() {
   int fds[2];
   auto socket_result = make_socket_pair(fds);
@@ -1174,6 +1210,7 @@ void test_clask_static_path_resolution() {
 }
 
 int main() {
+  subtest("test_clask_connection_tokens", test_clask_connection_tokens);
   subtest("test_clask_empty_parameters", test_clask_empty_parameters);
   subtest("test_clask_params", test_clask_params);
   subtest("test_clask_request_parse_multipart1", test_clask_request_parse_multipart1);
