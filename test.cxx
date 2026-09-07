@@ -90,6 +90,33 @@ void test_clask_params() {
   _ok(result["plus"] == "1+2", R"(result["plus"] == "1+2")");
 }
 
+void test_clask_empty_parameters() {
+  auto values = clask::params("empty=&value=first&value=&plus%2B=&equals=a=b");
+  _ok(values.count("empty") == 1, "empty values are retained");
+  _ok(values.at("value").empty(), "empty duplicate replaces previous value");
+  _ok(values.count("plus+") == 1, "empty values still decode their keys");
+  _ok(values.at("equals") == "a=b", "only the first equals separates the value");
+
+  int fds[2];
+  if (!make_socket_pair(fds)) {
+    _ok(false, "create socket pair");
+    return;
+  }
+  const std::string wire = "GET /?empty=&value=first&value=&plus%2B= HTTP/1.1\r\nHost: localhost\r\n\r\n";
+  _ok(socket_write(fds[0], wire.data(), wire.size()) == (ssize_t) wire.size(), "write request");
+  shutdown(fds[0], SHUT_WR);
+  auto result = clask::read_request_from_socket(fds[1]);
+  _ok(result.ok, "read query parameters");
+  if (result.req) {
+    const auto& query = result.req->uri_params;
+    _ok(query.count("empty") == 1, "empty query values are retained");
+    _ok(query.at("value").empty(), "empty duplicate query replaces previous value");
+    _ok(query.count("plus+") == 1, "empty query values still decode their keys");
+  }
+  closesocket(fds[0]);
+  closesocket(fds[1]);
+}
+
 void test_clask_request_parse_multipart1() {
   std::vector<clask::part> parts;
   bool result;
@@ -1147,6 +1174,7 @@ void test_clask_static_path_resolution() {
 }
 
 int main() {
+  subtest("test_clask_empty_parameters", test_clask_empty_parameters);
   subtest("test_clask_params", test_clask_params);
   subtest("test_clask_request_parse_multipart1", test_clask_request_parse_multipart1);
   subtest("test_clask_request_parse_multipart2", test_clask_request_parse_multipart2);
