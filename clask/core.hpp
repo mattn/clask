@@ -1004,11 +1004,12 @@ inline std::string form_url_decode(std::string s) {
 inline std::unordered_map<std::string, std::string> params(const std::string& s) {
   std::unordered_map<std::string, std::string> ret;
   std::istringstream iss(s);
-  std::string keyval, key, val;
+  std::string keyval;
   while(std::getline(iss, keyval, '&')) {
-    std::istringstream isk(keyval);
-    if(std::getline(std::getline(isk, key, '='), val)) {
-      ret[form_url_decode(key)] = form_url_decode(val);
+    auto separator = keyval.find('=');
+    if (separator != std::string::npos) {
+      ret[form_url_decode(keyval.substr(0, separator))] =
+          form_url_decode(keyval.substr(separator + 1));
     }
   }
   return ret;
@@ -1324,14 +1325,7 @@ inline request_read_result read_request_from_socket(int s) {
   auto pos = req_path.find('?');
   if (pos != std::string::npos) {
     req_path.resize(pos);
-    std::istringstream iss(req_raw_path.substr(pos + 1));
-    std::string keyval, key, val;
-    while (std::getline(iss, keyval, '&')) {
-      std::istringstream isk(keyval);
-      if(std::getline(std::getline(isk, key, '='), val)) {
-        req_uri_params[form_url_decode(key)] = form_url_decode(val);
-      }
-    }
+    req_uri_params = params(req_raw_path.substr(pos + 1));
   }
 
   bool keep_alive = minor_version == 1;
