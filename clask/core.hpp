@@ -913,6 +913,10 @@ static std::unordered_map<std::string, std::string> content_types = {
   { ".jpeg", "image/jpeg" },
   { ".gif",  "image/gif" },
   { ".css",  "text/css" },
+  { ".svg",  "image/svg+xml" },
+  { ".ico",  "image/x-icon" },
+  { ".webp", "image/webp" },
+  { ".woff2", "font/woff2" },
 };
 
 
