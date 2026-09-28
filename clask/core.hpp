@@ -1456,6 +1456,15 @@ inline int func_t::handle(int s, request& req, bool& keep_alive) const {
     code = writer.code;
   } else if (f_response != nullptr) {
     auto res = f_response(req);
+    for (auto& h : res.headers) {
+      if (camelize(h.first) != "Connection") continue;
+      auto value = h.second;
+      for (auto& c : value) c = (char) std::tolower(static_cast<unsigned char>(c));
+      for (auto token : split_string(value, ',')) {
+        trim_string(token, " \t");
+        if (token == "close") keep_alive = false;
+      }
+    }
     auto has_connection = false;
     std::string hdr;
     hdr.reserve(256 + res.content.size());
@@ -1472,7 +1481,7 @@ inline int func_t::handle(int s, request& req, bool& keep_alive) const {
         has_connection = true;
       hdr += key;
       hdr += ": ";
-      hdr += h.second;
+      hdr += key == "Connection" && !keep_alive ? "Close" : h.second;
       hdr += "\r\n";
     }
     if (!has_connection) {

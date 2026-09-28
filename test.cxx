@@ -1004,6 +1004,38 @@ void test_clask_serve_file_head_request() {
   remove(path.c_str());
 }
 
+void test_clask_response_connection_close() {
+  for (const auto& value : {"close", "Keep-Alive, ClOsE", "keep-alive"}) {
+    for (bool request_keep_alive : {false, true}) {
+      int fds[2];
+      if (!make_socket_pair(fds)) {
+        _ok(false, "create socket pair");
+        return;
+      }
+      clask::func_t fn{};
+      fn.f_response = [&](clask::request&) {
+        return clask::response{200, "ok", {{"Connection", value}}};
+      };
+      clask::request req("GET", "/", "/", {}, {}, "");
+      bool keep_alive = request_keep_alive;
+      fn.handle(fds[1], req, keep_alive);
+      shutdown(fds[1], SHUT_WR);
+      std::string output;
+      char buf[1024];
+      ssize_t n;
+      while ((n = recv(fds[0], buf, sizeof(buf), 0)) > 0) output.append(buf, (size_t) n);
+      bool expected = request_keep_alive && std::string(value) == "keep-alive";
+      _ok(keep_alive == expected, "response close token controls connection reuse");
+      if (!expected) {
+        _ok(output.find("Connection: Close\r\n") != std::string::npos,
+            "response advertises closure when either side requires it");
+      }
+      closesocket(fds[0]);
+      closesocket(fds[1]);
+    }
+  }
+}
+
 void test_clask_sse_writer_output() {
   int fds[2];
   _ok(make_socket_pair(fds) == true, R"(make_socket_pair(fds) == true)");
@@ -1380,6 +1412,7 @@ int main() {
   subtest("test_clask_head_route_match", test_clask_head_route_match);
   subtest("test_clask_serve_file_head_request", test_clask_serve_file_head_request);
   subtest("test_clask_sse_writer_output", test_clask_sse_writer_output);
+  subtest("test_clask_response_connection_close", test_clask_response_connection_close);
   subtest("test_clask_chunked_writer_output", test_clask_chunked_writer_output);
   subtest("test_clask_response_writer_end_keeps_socket_open", test_clask_response_writer_end_keeps_socket_open);
   subtest("test_clask_static_dir_custom_404_page", test_clask_static_dir_custom_404_page);
