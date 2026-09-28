@@ -947,6 +947,33 @@ void test_clask_sse_writer_output() {
   closesocket(fds[1]);
 }
 
+void test_clask_chunked_writer_output() {
+  int fds[2];
+  if (!make_socket_pair(fds)) {
+    _ok(false, "create socket pair");
+    return;
+  }
+  clask::response_writer resp(fds[1], 200);
+  clask::chunked_writer writer(resp);
+  writer.write("");
+  char data[] = "world";
+  writer.write(data, 0);
+  writer.write("hello");
+  writer.write(data, 5);
+  writer.end();
+  std::string out;
+  char buf[4096];
+  ssize_t n;
+  while ((n = recv(fds[0], buf, sizeof(buf), 0)) > 0) {
+    out.append(buf, (size_t) n);
+  }
+  _ok(out == "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"
+             "5\r\nhello\r\n5\r\nworld\r\n0\r\n\r\n",
+      "chunked response has framing header and exactly one terminator");
+  closesocket(fds[0]);
+  closesocket(fds[1]);
+}
+
 void test_clask_response_writer_end_keeps_socket_open() {
   int fds[2];
   _ok(make_socket_pair(fds) == true, R"(make_socket_pair(fds) == true)");
@@ -1266,6 +1293,7 @@ int main() {
   subtest("test_clask_head_route_match", test_clask_head_route_match);
   subtest("test_clask_serve_file_head_request", test_clask_serve_file_head_request);
   subtest("test_clask_sse_writer_output", test_clask_sse_writer_output);
+  subtest("test_clask_chunked_writer_output", test_clask_chunked_writer_output);
   subtest("test_clask_response_writer_end_keeps_socket_open", test_clask_response_writer_end_keeps_socket_open);
   subtest("test_clask_static_dir_custom_404_page", test_clask_static_dir_custom_404_page);
   subtest("test_clask_static_dir_plain_404_without_page", test_clask_static_dir_plain_404_without_page);
