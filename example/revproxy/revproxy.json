@@ -1,0 +1,9 @@
+{
+  "listen": "0.0.0.0:8080",
+  "worker_count": 32,
+  "timeout": 30000,
+  "proxies": [
+    { "path": "/api/", "upstream": "http://127.0.0.1:8081/v1/" },
+    { "path": "/auth/", "upstream": "http://127.0.0.1:8082/", "timeout": 5000 }
+  ]
+}

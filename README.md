@@ -29,6 +29,21 @@ int main() {
 
 `run()` uses a worker-pool runtime by default. Accepted sockets are queued, idle keep-alive connections stay in the event loop, and overloaded accepts return `503 Service Unavailable` instead of spawning unbounded threads.
 
+## Reverse Proxy
+
+```cpp
+auto s = clask::server();
+// /api/users?id=1 is forwarded to http://127.0.0.1:9000/v1/users?id=1
+s.reverse_proxy("/api/", "http://127.0.0.1:9000/v1/");
+s.run();
+```
+
+- `GET`/`HEAD`/`POST`/`QUERY` requests under the mount path are forwarded.
+- Hop-by-hop headers are removed, `Host` is rewritten to the upstream, and `X-Forwarded-For`/`X-Forwarded-Host`/`X-Forwarded-Proto` are added.
+- The upstream response is streamed back as is, including chunked bodies. The client connection is closed after each proxied response.
+- An unreachable upstream returns `502 Bad Gateway`, and a response that does not arrive within the timeout (third argument, default `30000` ms) returns `504 Gateway Timeout`.
+- Only `http://` upstreams are supported.
+
 ## Runtime Tuning
 
 `server_t` exposes a few knobs for the worker-pool based runtime:

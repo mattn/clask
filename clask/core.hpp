@@ -24,6 +24,8 @@
 #include <filesystem>
 #include <chrono>
 #include <limits>
+#include <cstring>
+#include <stdexcept>
 
 #ifdef _WIN32
 # include <ws2tcpip.h>
@@ -1094,11 +1096,13 @@ public:
   // HEAD requests send the same headers as GET but no body.
   bool head_only = false;
   void set_header(std::string, const std::string&);
+  void add_header(std::string, const std::string&);
   void clear_header();
   virtual void write(const std::string&);
   virtual void write(char*, size_t);
   virtual void write_headers();
   virtual void end();
+  bool good() const { return !failed; }
 };
 
 class server_sent_event_writer {
@@ -1199,6 +1203,10 @@ inline void response_writer::set_header(std::string key, const std::string& val)
   headers.emplace_back(h, val);
 }
 
+inline void response_writer::add_header(std::string key, const std::string& val) {
+  headers.emplace_back(camelize(key), val);
+}
+
 inline void response_writer::write(char* buf, size_t n) {
   if (!header_out) {
     write_headers();
@@ -1263,6 +1271,7 @@ struct request {
   std::vector<header> headers;
   std::string body;
   std::vector<std::string> args;
+  std::string remote_addr;
 
   request(
       std::string method, std::string raw_uri, std::string uri,
@@ -1673,6 +1682,7 @@ inline bool dispatch_request(
     bool& keep_alive) {
   if (!match_fn(req.method, req.uri, [&](const func_t& fn, const std::vector<std::string>& args) {
     req.args = args;
+    req.remote_addr = remote;
     int code = 500;
     try {
       code = fn.handle(s, req, keep_alive);
@@ -1783,6 +1793,10 @@ void QUERY(const std::string&, const functor_ ## name);
       const std::string&,
       bool listing = false,
       const std::vector<header>& extra_headers = {});
+  void reverse_proxy(
+      const std::string&,
+      const std::string&,
+      int timeout_ms = 30000);
   server_t& worker_count(unsigned int) &;
   server_t&& worker_count(unsigned int) &&;
   server_t& accept_queue_limit(size_t) &;
@@ -2177,6 +2191,323 @@ inline void server_t::static_dir(
       serve_file(resp, req, req_path, extra_headers);
     };
   });
+}
+
+struct proxy_upstream {
+  std::string host;
+  std::string port;
+  std::string host_header;
+  std::string base_path;
+};
+
+inline proxy_upstream parse_proxy_upstream(const std::string& url) {
+  const std::string scheme = "http://";
+  if (url.compare(0, scheme.size(), scheme) != 0) {
+    throw std::invalid_argument("reverse_proxy: only http:// upstreams are supported: " + url);
+  }
+  auto rest = url.substr(scheme.size());
+  auto slash = rest.find('/');
+  auto authority = rest.substr(0, slash);
+  proxy_upstream upstream{
+    .host = "",
+    .port = "80",
+    .host_header = authority,
+    .base_path = slash == std::string::npos ? "/" : rest.substr(slash),
+  };
+  std::string port;
+  if (!authority.empty() && authority[0] == '[') {
+    auto close = authority.find(']');
+    if (close == std::string::npos) {
+      throw std::invalid_argument("reverse_proxy: invalid upstream: " + url);
+    }
+    upstream.host = authority.substr(1, close - 1);
+    if (close + 1 < authority.size()) {
+      if (authority[close + 1] != ':') {
+        throw std::invalid_argument("reverse_proxy: invalid upstream: " + url);
+      }
+      port = authority.substr(close + 2);
+    }
+  } else {
+    auto colon = authority.rfind(':');
+    upstream.host = authority.substr(0, colon);
+    if (colon != std::string::npos) {
+      port = authority.substr(colon + 1);
+    }
+  }
+  if (upstream.host.empty()
+      || upstream.base_path.find_first_of("?#") != std::string::npos) {
+    throw std::invalid_argument("reverse_proxy: invalid upstream: " + url);
+  }
+  if (!port.empty()) {
+    if (port.find_first_not_of("0123456789") != std::string::npos) {
+      throw std::invalid_argument("reverse_proxy: invalid upstream port: " + url);
+    }
+    upstream.port = port;
+  }
+  return upstream;
+}
+
+// Maps a raw request URI under mount_path to the upstream request target.
+// Returns nullopt when the URI is outside the mount or escapes it with "..".
+inline std::optional<std::string> proxy_target_path(
+    const std::string& raw_uri,
+    const std::string& mount_path,
+    const std::string& base_path) {
+  auto query_pos = raw_uri.find('?');
+  auto raw_path = raw_uri.substr(0, query_pos);
+  std::string rest;
+  if (raw_path.compare(0, mount_path.size(), mount_path) == 0) {
+    rest = raw_path.substr(mount_path.size());
+  } else if (!mount_path.empty() && mount_path.back() == '/'
+      && raw_path == mount_path.substr(0, mount_path.size() - 1)) {
+    rest = "";
+  } else {
+    return std::nullopt;
+  }
+  for (const auto& segment : split_string(url_decode(rest), '/')) {
+    if (segment == "..") {
+      return std::nullopt;
+    }
+  }
+
+  auto target = base_path.empty() ? std::string("/") : base_path;
+  if (target.back() == '/' && !rest.empty() && rest[0] == '/') {
+    target += rest.substr(1);
+  } else if (target.back() != '/' && !rest.empty() && rest[0] != '/') {
+    target += "/" + rest;
+  } else {
+    target += rest;
+  }
+  if (query_pos != std::string::npos) {
+    target += raw_uri.substr(query_pos);
+  }
+  return target;
+}
+
+inline std::vector<std::string> proxy_connection_tokens(const std::vector<header>& headers) {
+  std::vector<std::string> tokens;
+  for (const auto& h : headers) {
+    auto key = h.first;
+    if (camelize(key) != "Connection") continue;
+    for (auto token : split_string(h.second, ',')) {
+      trim_string(token, " \t");
+      if (!token.empty()) tokens.push_back(camelize(token));
+    }
+  }
+  return tokens;
+}
+
+inline bool is_hop_by_hop_header(
+    const std::string& key,
+    const std::vector<std::string>& connection_tokens) {
+  static const char* hop_by_hop[] = {
+    "Connection", "Keep-Alive", "Proxy-Connection", "Proxy-Authenticate",
+    "Proxy-Authorization", "Te", "Trailer", "Transfer-Encoding", "Upgrade",
+  };
+  for (auto name : hop_by_hop) {
+    if (key == name) return true;
+  }
+  return std::find(connection_tokens.begin(), connection_tokens.end(), key)
+      != connection_tokens.end();
+}
+
+inline std::string build_proxy_request(
+    const request& req,
+    const proxy_upstream& upstream,
+    const std::string& target) {
+  auto tokens = proxy_connection_tokens(req.headers);
+  std::string forwarded_for, forwarded_host, forwarded_proto, original_host;
+  std::string out;
+  out.reserve(512 + req.body.size());
+  out += req.method + " " + target + " HTTP/1.1\r\n";
+  out += "Host: " + upstream.host_header + "\r\n";
+  for (const auto& h : req.headers) {
+    auto key = h.first;
+    camelize(key);
+    if (key == "Host") {
+      original_host = h.second;
+      continue;
+    }
+    if (key == "X-Forwarded-For") {
+      forwarded_for += (forwarded_for.empty() ? "" : ", ") + h.second;
+      continue;
+    }
+    if (key == "X-Forwarded-Host") forwarded_host = h.second;
+    if (key == "X-Forwarded-Proto") forwarded_proto = h.second;
+    // The body has already been read, so the upstream must not wait for 100-continue.
+    if (key == "Content-Length" || key == "Expect" || is_hop_by_hop_header(key, tokens)) {
+      continue;
+    }
+    out += key + ": " + h.second + "\r\n";
+  }
+  if (!req.remote_addr.empty()) {
+    forwarded_for += (forwarded_for.empty() ? "" : ", ") + req.remote_addr;
+  }
+  if (!forwarded_for.empty()) {
+    out += "X-Forwarded-For: " + forwarded_for + "\r\n";
+  }
+  if (forwarded_host.empty() && !original_host.empty()) {
+    out += "X-Forwarded-Host: " + original_host + "\r\n";
+  }
+  if (forwarded_proto.empty()) {
+    out += "X-Forwarded-Proto: http\r\n";
+  }
+  if (!req.body.empty() || req.method == "POST" || req.method == "QUERY") {
+    out += "Content-Length: " + std::to_string(req.body.size()) + "\r\n";
+  }
+  out += "Connection: close\r\n\r\n";
+  out += req.body;
+  return out;
+}
+
+inline int connect_proxy_upstream(const proxy_upstream& upstream, int timeout_ms) {
+  struct addrinfo hints{}, *result = nullptr;
+  hints.ai_family = AF_UNSPEC;
+  hints.ai_socktype = SOCK_STREAM;
+  if (getaddrinfo(upstream.host.c_str(), upstream.port.c_str(), &hints, &result) != 0) {
+    return -1;
+  }
+  int s = -1;
+  for (auto ai = result; ai != nullptr; ai = ai->ai_next) {
+    s = (int) socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+    if (s < 0) continue;
+    if (set_socket_timeout(s, SO_RCVTIMEO, timeout_ms)
+        && set_socket_timeout(s, SO_SNDTIMEO, timeout_ms)
+        && connect(s, ai->ai_addr, (socklen_t) ai->ai_addrlen) == 0) {
+      break;
+    }
+    closesocket(s);
+    s = -1;
+  }
+  freeaddrinfo(result);
+  return s;
+}
+
+inline bool proxy_recv_timed_out() {
+#ifdef _WIN32
+  return WSAGetLastError() == WSAETIMEDOUT;
+#else
+  return errno == EAGAIN || errno == EWOULDBLOCK;
+#endif
+}
+
+inline void proxy_request(
+    response_writer& resp,
+    request& req,
+    const proxy_upstream& upstream,
+    const std::string& mount_path,
+    int timeout_ms) {
+  auto target = proxy_target_path(req.raw_uri, mount_path, upstream.base_path);
+  if (!target) {
+    write_status_text_response(resp, 404);
+    return;
+  }
+
+  auto s = connect_proxy_upstream(upstream, timeout_ms);
+  if (s < 0) {
+    write_status_text_response(resp, 502);
+    return;
+  }
+  auto wire = build_proxy_request(req, upstream, *target);
+  if (!send_all(s, wire.data(), wire.size())) {
+    closesocket(s);
+    write_status_text_response(resp, 502);
+    return;
+  }
+
+  char buf[16384];
+  size_t buflen = 0, prevbuflen = 0, num_headers = 0, msg_len;
+  int minor_version, status = 0, pret = 0;
+  const char* msg;
+  struct phr_header headers[100];
+  auto need_read = true;
+  while (true) {
+    prevbuflen = need_read ? buflen : 0;
+    if (need_read) {
+      ssize_t rret;
+      while ((rret = recv(s, buf + buflen, (int) (sizeof(buf) - buflen), 0)) == -1 && errno == EINTR);
+      if (rret <= 0) {
+        auto timed_out = rret < 0 && proxy_recv_timed_out();
+        closesocket(s);
+        write_status_text_response(resp, timed_out ? 504 : 502);
+        return;
+      }
+      buflen += (size_t) rret;
+    }
+    need_read = true;
+    num_headers = sizeof(headers) / sizeof(headers[0]);
+    pret = phr_parse_response(
+        buf, buflen, &minor_version, &status, &msg, &msg_len,
+        headers, &num_headers, prevbuflen);
+    if (pret > 0 && status >= 100 && status < 200) {
+      // Skip interim responses such as 100 Continue.
+      std::memmove(buf, buf + pret, buflen - (size_t) pret);
+      buflen -= (size_t) pret;
+      // The final response may already be buffered.
+      need_read = buflen == 0;
+      continue;
+    }
+    if (pret > 0) break;
+    if (pret == -1 || buflen == sizeof(buf)) {
+      closesocket(s);
+      write_status_text_response(resp, 502);
+      return;
+    }
+  }
+  if (status_codes.find(status) == status_codes.end()) {
+    closesocket(s);
+    write_status_text_response(resp, 502);
+    return;
+  }
+
+  std::vector<header> upstream_headers;
+  for (size_t n = 0; n < num_headers; n++) {
+    upstream_headers.emplace_back(
+        std::string(headers[n].name, headers[n].name_len),
+        std::string(headers[n].value, headers[n].value_len));
+  }
+  auto tokens = proxy_connection_tokens(upstream_headers);
+  resp.clear_header();
+  resp.code = status;
+  for (auto& h : upstream_headers) {
+    auto key = h.first;
+    camelize(key);
+    // The body is relayed verbatim until the upstream closes, so framing
+    // headers such as Transfer-Encoding and Trailer stay as they are.
+    if (key != "Transfer-Encoding" && key != "Trailer" && is_hop_by_hop_header(key, tokens)) {
+      continue;
+    }
+    resp.add_header(key, h.second);
+  }
+  resp.add_header("Connection", "Close");
+  resp.write_headers();
+
+  if (buflen > (size_t) pret) {
+    resp.write(buf + pret, buflen - (size_t) pret);
+  }
+  while (resp.good() && !resp.head_only) {
+    ssize_t rret;
+    while ((rret = recv(s, buf, (int) sizeof(buf), 0)) == -1 && errno == EINTR);
+    if (rret <= 0) break;
+    resp.write(buf, (size_t) rret);
+  }
+  closesocket(s);
+}
+
+inline void server_t::reverse_proxy(
+    const std::string& path,
+    const std::string& upstream_url,
+    int timeout_ms) {
+  auto upstream = parse_proxy_upstream(upstream_url);
+  functor_writer handler = [path, upstream, timeout_ms](response_writer& resp, request& req) {
+    proxy_request(resp, req, upstream, path, timeout_ms);
+  };
+  for (auto method : {route_method::get, route_method::post, route_method::query}) {
+    register_route(method, path, [&](func_t& func) {
+      func.prefix_match = true;
+      func.f_writer = handler;
+    });
+  }
 }
 
 inline void server_t::_run(const std::string& host, int port = 8080) {

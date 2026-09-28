@@ -6,6 +6,7 @@ add_subdirectory (static)
 add_subdirectory (upload)
 add_subdirectory (stream)
 add_subdirectory (file)
+add_subdirectory (revproxy)
 
 find_package (SQLITE3)
 if (SQLITE3_FOUND)
