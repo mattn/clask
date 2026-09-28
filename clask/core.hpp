@@ -79,6 +79,7 @@ struct socket_wait_event {
 struct socket_wait_result {
   bool server_readable;
   std::vector<socket_wait_event> events;
+  bool worker_completed = false;
 };
 
 struct connection_state {
@@ -184,6 +185,7 @@ struct server_runtime_state {
   std::mutex ready_queue_mu;
   std::condition_variable ready_queue_cv;
   std::deque<connection_state> ready_queue;
+  size_t waiting_workers = 0;
   std::mutex completed_queue_mu;
   std::deque<completed_connection> completed_queue;
   std::unordered_map<int, connection_state> idle_connections;
@@ -225,7 +227,8 @@ inline void drain_completed_connections(server_runtime_state& runtime);
 inline void accept_ready_connection(
     int server_fd,
     size_t accept_queue_limit,
-    server_runtime_state& runtime);
+    server_runtime_state& runtime,
+    int socket_timeout_ms = keep_alive_timeout_ms);
 inline void requeue_readable_idle_connections(
     const std::vector<socket_wait_event>& events,
     server_runtime_state& runtime);
@@ -277,6 +280,7 @@ inline socket_wait_result wait_socket_events(
     throw std::runtime_error("select");
   }
   result.server_readable = FD_ISSET((SOCKET) server_fd, &readfds);
+  result.worker_completed = wakeup_fd >= 0 && FD_ISSET((SOCKET) wakeup_fd, &readfds);
   result.events.reserve(idle_connections.size());
   for (const auto& conn : idle_connections) {
     if (FD_ISSET((SOCKET) conn.second.fd, &readfds)) {
@@ -314,6 +318,7 @@ inline socket_wait_result wait_socket_events(
     throw std::runtime_error("poll");
   }
   result.server_readable = ready > 0 && (fds.front().revents & POLLIN);
+  result.worker_completed = wakeup_fd >= 0 && (fds.back().revents & POLLIN);
   result.events.reserve(idle_connections.size());
   for (size_t i = 1; i < connection_fds; i++) {
     if (fds[i].revents == 0) {
@@ -539,7 +544,9 @@ inline void start_worker_pool(
         connection_state conn;
         {
           std::unique_lock<std::mutex> lk(runtime.ready_queue_mu);
+          ++runtime.waiting_workers;
           runtime.ready_queue_cv.wait(lk, [&]() { return !runtime.ready_queue.empty(); });
+          --runtime.waiting_workers;
           conn = std::move(runtime.ready_queue.front());
           runtime.ready_queue.pop_front();
         }
@@ -556,7 +563,8 @@ inline void run_server_event_loop(
     unsigned int worker_count,
     size_t accept_queue_limit,
     server_runtime_state& runtime,
-    HandleConnectionFn&& handle_connection) {
+    HandleConnectionFn&& handle_connection,
+    int socket_timeout_ms = keep_alive_timeout_ms) {
   runtime.wakeup.open();
   start_worker_pool(
       worker_count,
@@ -568,14 +576,14 @@ inline void run_server_event_loop(
     auto wait_result = wait_socket_events(server_fd, runtime.idle_connections, 100, runtime.wakeup.fd());
     // Clear the notification before draining its queue so a concurrent
     // completion is either consumed now or leaves a notification for next time.
-    runtime.wakeup.drain();
+    if (wait_result.worker_completed) runtime.wakeup.drain();
     drain_completed_connections(runtime);
     if (!wait_result.server_readable && wait_result.events.empty()) {
       continue;
     }
 
     if (wait_result.server_readable) {
-      accept_ready_connection(server_fd, accept_queue_limit, runtime);
+      accept_ready_connection(server_fd, accept_queue_limit, runtime, socket_timeout_ms);
     }
 
     requeue_readable_idle_connections(wait_result.events, runtime);
@@ -585,20 +593,22 @@ inline void run_server_event_loop(
 inline void enqueue_ready_connection(
     server_runtime_state& runtime,
     connection_state conn) {
+  bool notify;
   {
     std::lock_guard<std::mutex> lk(runtime.ready_queue_mu);
     runtime.ready_queue.emplace_back(std::move(conn));
+    notify = runtime.waiting_workers > 0;
   }
-  runtime.ready_queue_cv.notify_one();
+  if (notify) runtime.ready_queue_cv.notify_one();
 }
 
 inline void drain_completed_connections(
     server_runtime_state& runtime) {
+  std::unique_lock<std::mutex> lk(runtime.completed_queue_mu);
+  if (runtime.completed_queue.empty()) return;
   std::deque<completed_connection> drained;
-  {
-    std::lock_guard<std::mutex> lk(runtime.completed_queue_mu);
-    drained.swap(runtime.completed_queue);
-  }
+  drained.swap(runtime.completed_queue);
+  lk.unlock();
   for (auto& conn : drained) {
     if (conn.keep_alive) {
       runtime.idle_connections.emplace(conn.conn.fd, std::move(conn.conn));
@@ -611,7 +621,8 @@ inline void drain_completed_connections(
 inline void accept_ready_connection(
     int server_fd,
     size_t accept_queue_limit,
-    server_runtime_state& runtime) {
+    server_runtime_state& runtime,
+    int socket_timeout_ms) {
   if (runtime.tracked_connections.load() >= accept_queue_limit) {
     connection_state conn{};
     if (accept_connection(server_fd, conn)) {
@@ -626,6 +637,11 @@ inline void accept_ready_connection(
     socket_perror("accept");
     return;
   }
+  if (!set_socket_timeout(conn.fd, SO_RCVTIMEO, socket_timeout_ms)
+      || !set_socket_timeout(conn.fd, SO_SNDTIMEO, socket_timeout_ms)) {
+    closesocket(conn.fd);
+    return;
+  }
   runtime.tracked_connections++;
   enqueue_ready_connection(runtime, std::move(conn));
 }
@@ -633,6 +649,8 @@ inline void accept_ready_connection(
 inline void requeue_readable_idle_connections(
     const std::vector<socket_wait_event>& events,
     server_runtime_state& runtime) {
+  std::vector<connection_state> ready;
+  ready.reserve(events.size());
   for (const auto& event : events) {
     auto it = runtime.idle_connections.find(event.fd);
     if (it == runtime.idle_connections.end()) {
@@ -645,10 +663,18 @@ inline void requeue_readable_idle_connections(
       continue;
     }
     if (event.readable) {
-      enqueue_ready_connection(runtime, std::move(it->second));
+      ready.emplace_back(std::move(it->second));
       runtime.idle_connections.erase(it);
     }
   }
+  if (ready.empty()) return;
+  size_t notify_count;
+  {
+    std::lock_guard<std::mutex> lk(runtime.ready_queue_mu);
+    for (auto& conn : ready) runtime.ready_queue.emplace_back(std::move(conn));
+    notify_count = std::min(ready.size(), runtime.waiting_workers);
+  }
+  while (notify_count-- > 0) runtime.ready_queue_cv.notify_one();
 }
 
 inline bool send_text_response(
@@ -1676,9 +1702,10 @@ inline bool handle_connection_request(
     int s,
     const std::string& remote,
     int socket_timeout_ms,
-    MatchFn&& match_fn) {
-  if (!set_socket_timeout(s, SO_RCVTIMEO, socket_timeout_ms)
-      || !set_socket_timeout(s, SO_SNDTIMEO, socket_timeout_ms)) {
+    MatchFn&& match_fn,
+    bool configure_timeout = true) {
+  if (configure_timeout && (!set_socket_timeout(s, SO_RCVTIMEO, socket_timeout_ms)
+      || !set_socket_timeout(s, SO_SNDTIMEO, socket_timeout_ms))) {
     closesocket(s);
     return false;
   }
@@ -1933,7 +1960,7 @@ inline bool server_t::handle_connection_socket(
           return false;
         }
         return match(*parsed_method, path, fn);
-      });
+      }, false);
 }
 
 #ifdef CLASK_TEST
@@ -2170,7 +2197,7 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
       runtime,
       [&](int s, const std::string& remote) {
         return handle_connection_socket(s, remote, config);
-      });
+      }, config.socket_timeout_ms);
 }
 
 inline void server_t::run(const std::string& addr) {

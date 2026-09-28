@@ -1319,6 +1319,80 @@ void test_clask_accept_failure_does_not_throw() {
   _ok(runtime.ready_queue.empty() == true, R"(runtime.ready_queue.empty() == true)");
 }
 
+static int socket_timeout_ms(int fd, int option) {
+#ifdef _WIN32
+  DWORD value = 0;
+#else
+  timeval value{};
+#endif
+  socklen_t size = sizeof(value);
+  if (getsockopt(fd, SOL_SOCKET, option, (char*) &value, &size) != 0) return -1;
+#ifdef _WIN32
+  return (int) value;
+#else
+  return (int) (value.tv_sec * 1000 + value.tv_usec / 1000);
+#endif
+}
+
+void test_clask_accepted_socket_timeouts() {
+  clask::initialize_network_runtime();
+  int listener = clask::create_listening_socket("127.0.0.1", 0);
+  sockaddr_in address{};
+  socklen_t size = sizeof(address);
+  _ok(getsockname(listener, (sockaddr*) &address, &size) == 0, "get listener address");
+  int client = (int) socket(AF_INET, SOCK_STREAM, 0);
+  if (connect(client, (sockaddr*) &address, size) != 0) {
+    _ok(false, "connect test client");
+    closesocket(client);
+    closesocket(listener);
+    return;
+  }
+  clask::server_runtime_state runtime;
+  clask::accept_ready_connection(listener, 4, runtime, 1000);
+  _ok(runtime.ready_queue.size() == 1, "accepted socket is queued");
+  if (runtime.ready_queue.empty()) {
+    closesocket(client);
+    closesocket(listener);
+    return;
+  }
+  int fd = runtime.ready_queue.front().fd;
+  _ok(socket_timeout_ms(fd, SO_RCVTIMEO) == 1000, "set receive timeout on accept");
+  _ok(socket_timeout_ms(fd, SO_SNDTIMEO) == 1000, "set send timeout on accept");
+  clask::func_t handler{};
+  handler.f_string = [](clask::request&) { return "ok"; };
+  for (int i = 0; i < 2; ++i) {
+    const std::string wire = "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n";
+    _ok(socket_write(client, wire.data(), wire.size()) == (ssize_t) wire.size(), "send keep-alive request");
+    auto keep_alive = clask::handle_connection_request(fd, "test", 5000,
+        [&](const std::string&, const std::string&, const auto& callback) {
+          callback(handler, {});
+          return true;
+        }, false);
+    _ok(keep_alive, "keep connection open after response");
+    _ok(socket_timeout_ms(fd, SO_RCVTIMEO) == 1000, "keep accepted receive timeout");
+    _ok(socket_timeout_ms(fd, SO_SNDTIMEO) == 1000, "keep accepted send timeout");
+  }
+  closesocket(fd);
+  closesocket(client);
+  closesocket(listener);
+}
+
+void test_clask_ready_connection_batch() {
+  clask::server_runtime_state runtime;
+  runtime.idle_connections.emplace(10, clask::connection_state{10, "first"});
+  runtime.idle_connections.emplace(11, clask::connection_state{11, "second"});
+  runtime.idle_connections.emplace(12, clask::connection_state{12, "idle"});
+  clask::requeue_readable_idle_connections({{10, true, false}, {11, true, false},
+      {10, true, false}, {12, false, false}, {99, true, false}}, runtime);
+  _ok(runtime.ready_queue.size() == 2, "queue each readable connection once");
+  if (runtime.ready_queue.size() == 2) {
+    _ok(runtime.ready_queue[0].remote == "first" && runtime.ready_queue[1].remote == "second",
+        "preserve connection metadata and event order");
+  }
+  _ok(runtime.idle_connections.size() == 1 && runtime.idle_connections.count(12) == 1,
+      "leave unreadable connection in the event loop");
+}
+
 void test_clask_worker_completion_wakeup() {
   clask::initialize_network_runtime();
   clask::server_runtime_state runtime;
@@ -1342,6 +1416,7 @@ void test_clask_worker_completion_wakeup() {
     worker.join();
     _ok(elapsed < std::chrono::milliseconds(500), "worker completion interrupts socket wait");
     _ok(!result.server_readable && result.events.empty(), "wakeup is not a client event");
+    _ok(result.worker_completed, "identify the worker wakeup separately");
     runtime.wakeup.drain();
     clask::drain_completed_connections(runtime);
     if (keep_alive) {
@@ -1529,6 +1604,8 @@ int main() {
   subtest("test_clask_accept_failure_does_not_throw", test_clask_accept_failure_does_not_throw);
   subtest("test_clask_server_runtime_helpers", test_clask_server_runtime_helpers);
   subtest("test_clask_worker_completion_wakeup", test_clask_worker_completion_wakeup);
+  subtest("test_clask_accepted_socket_timeouts", test_clask_accepted_socket_timeouts);
+  subtest("test_clask_ready_connection_batch", test_clask_ready_connection_batch);
   subtest("test_clask_fluent_server_setup", test_clask_fluent_server_setup);
   subtest("test_clask_static_path_resolution", test_clask_static_path_resolution);
   return done_testing();
