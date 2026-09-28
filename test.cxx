@@ -1319,6 +1319,63 @@ void test_clask_accept_failure_does_not_throw() {
   _ok(runtime.ready_queue.empty() == true, R"(runtime.ready_queue.empty() == true)");
 }
 
+void test_clask_worker_completion_wakeup() {
+  clask::initialize_network_runtime();
+  clask::server_runtime_state runtime;
+  runtime.wakeup.open();
+  int fds[2];
+  if (!make_socket_pair(fds)) {
+    _ok(false, "create socket pair");
+    return;
+  }
+  // Neither the listener stand-in nor any idle connection is readable.
+  // Only the worker's completion can wake this wait before its deadline.
+  for (bool keep_alive : {true, false}) {
+    runtime.tracked_connections = 1;
+    std::thread worker([&]() {
+      std::this_thread::sleep_for(std::chrono::milliseconds(20));
+      clask::complete_connection(runtime, {fds[1], "test"}, keep_alive);
+    });
+    auto start = std::chrono::steady_clock::now();
+    auto result = clask::wait_socket_events(fds[0], {}, 1000, runtime.wakeup.fd());
+    auto elapsed = std::chrono::steady_clock::now() - start;
+    worker.join();
+    _ok(elapsed < std::chrono::milliseconds(500), "worker completion interrupts socket wait");
+    _ok(!result.server_readable && result.events.empty(), "wakeup is not a client event");
+    runtime.wakeup.drain();
+    clask::drain_completed_connections(runtime);
+    if (keep_alive) {
+      _ok(runtime.idle_connections.count(fds[1]) == 1, "completed connection returns to idle monitoring");
+      runtime.idle_connections.clear();
+    } else {
+      _ok(runtime.tracked_connections == 0, "closed connection releases capacity promptly");
+    }
+  }
+  // Bursts must not block workers, and draining must allow a later wakeup.
+  runtime.tracked_connections = 10000;
+  for (int i = 0; i < 10000; ++i) {
+    clask::complete_connection(runtime, {-1, "test"}, false);
+  }
+  runtime.wakeup.drain();
+  clask::drain_completed_connections(runtime);
+  _ok(runtime.tracked_connections == 0, "drain every completion in a burst");
+  runtime.wakeup.notify();
+  auto start = std::chrono::steady_clock::now();
+  clask::wait_socket_events(fds[0], {}, 1000, runtime.wakeup.fd());
+  _ok(std::chrono::steady_clock::now() - start < std::chrono::milliseconds(500),
+      "notification queued before the wait is preserved");
+  runtime.wakeup.drain();
+  start = std::chrono::steady_clock::now();
+  clask::wait_socket_events(fds[0], {}, 50, runtime.wakeup.fd());
+  _ok(std::chrono::steady_clock::now() - start >= std::chrono::milliseconds(35),
+      "drained notification does not cause a busy loop");
+  for (int i = 0; i < 10000; ++i) runtime.wakeup.notify();
+  runtime.wakeup.drain();
+  _ok(true, "notification saturation does not block the producer");
+  closesocket(fds[0]);
+  closesocket(fds[1]);
+}
+
 void test_clask_server_runtime_helpers() {
   _ok(clask::resolve_worker_count(7) == 7, R"(clask::resolve_worker_count(7) == 7)");
   _ok(clask::resolve_accept_queue_limit(123, 7) == 123, R"(clask::resolve_accept_queue_limit(123, 7) == 123)");
@@ -1471,6 +1528,7 @@ int main() {
   subtest("test_clask_parent_reference_guard", test_clask_parent_reference_guard);
   subtest("test_clask_accept_failure_does_not_throw", test_clask_accept_failure_does_not_throw);
   subtest("test_clask_server_runtime_helpers", test_clask_server_runtime_helpers);
+  subtest("test_clask_worker_completion_wakeup", test_clask_worker_completion_wakeup);
   subtest("test_clask_fluent_server_setup", test_clask_fluent_server_setup);
   subtest("test_clask_static_path_resolution", test_clask_static_path_resolution);
   return done_testing();
