@@ -751,6 +751,30 @@ void test_clask_read_request_conflicting_content_length() {
   closesocket(fds[1]);
 }
 
+void test_clask_read_request_transfer_encoding() {
+  for (const auto& headers : {
+      "Transfer-Encoding: chunked\r\n",
+      "Transfer-Encoding: gzip\r\n",
+      "Transfer-Encoding: chunked\r\nContent-Length: 3\r\n",
+      "Content-Length: 3\r\nTransfer-Encoding: chunked\r\n"}) {
+    int fds[2];
+    if (!make_socket_pair(fds)) {
+      _ok(false, "create socket pair");
+      return;
+    }
+    const auto wire = std::string("POST / HTTP/1.1\r\nHost: localhost\r\n") +
+        headers + "\r\n3\r\nabc\r\n0\r\n\r\n";
+    _ok(socket_write(fds[0], wire.data(), wire.size()) == (ssize_t) wire.size(), "write encoded request");
+    shutdown(fds[0], SHUT_WR);
+    auto result = clask::read_request_from_socket(fds[1]);
+    _ok(!result.ok && !result.keep_alive, "reject unsupported framing and close connection");
+    const int expected = std::string(headers).find("Content-Length") != std::string::npos ? 400 : 501;
+    _ok(result.error_code == expected, "return %d for %s", expected, headers);
+    closesocket(fds[0]);
+    closesocket(fds[1]);
+  }
+}
+
 void test_clask_read_request_invalid_content_length() {
   int fds[2];
   auto socket_result = make_socket_pair(fds);
@@ -1347,6 +1371,7 @@ int main() {
   subtest("test_clask_request_read_result_helpers", test_clask_request_read_result_helpers);
   subtest("test_clask_parse_content_length", test_clask_parse_content_length);
   subtest("test_clask_read_request_invalid_content_length", test_clask_read_request_invalid_content_length);
+  subtest("test_clask_read_request_transfer_encoding", test_clask_read_request_transfer_encoding);
   subtest("test_clask_read_request_conflicting_content_length", test_clask_read_request_conflicting_content_length);
   subtest("test_clask_read_request_content_length_bounds_body", test_clask_read_request_content_length_bounds_body);
   subtest("test_clask_pipelined_requests", test_clask_pipelined_requests);

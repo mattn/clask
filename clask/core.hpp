@@ -1351,6 +1351,7 @@ inline request_read_result read_request_from_socket(int s) {
   bool keep_alive = minor_version == 1;
   bool connection_close = false;
   bool has_content_length = false;
+  bool has_transfer_encoding = false;
   size_t content_length = 0;
   for (size_t n = 0; n < num_headers; n++) {
     auto key = std::string(headers[n].name, headers[n].name_len);
@@ -1364,6 +1365,8 @@ inline request_read_result read_request_from_socket(int s) {
       }
       content_length = *parsed_content_length;
       has_content_length = true;
+    } else if (key == "Transfer-Encoding") {
+      has_transfer_encoding = true;
     } else if (key == "Connection") {
       for (auto& c : val) c = (char) std::tolower(static_cast<unsigned char>(c));
       for (auto token : split_string(val, ',')) {
@@ -1375,6 +1378,13 @@ inline request_read_result read_request_from_socket(int s) {
       }
     }
     req_headers.emplace_back(std::move(key), std::move(val));
+  }
+
+  if (has_transfer_encoding) {
+    if (has_content_length) {
+      return make_request_read_error(400, "Bad Request", "Ambiguous Request Framing");
+    }
+    return make_request_read_error(501, "Not Implemented", "Unsupported Transfer-Encoding");
   }
 
   if (connection_close) {
