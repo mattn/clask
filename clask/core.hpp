@@ -1734,8 +1734,11 @@ inline bool server_t::match(route_method method, const std::string& s, const std
       prefix_args = args;
     }
     if (offset >= s.size()) {
-      fn(n->fn, args);
-      return true;
+      if (n->fn.f_writer || n->fn.f_string || n->fn.f_response) {
+        fn(n->fn, args);
+        return true;
+      }
+      break;
     }
   }
   if (prefix_fn != nullptr) {

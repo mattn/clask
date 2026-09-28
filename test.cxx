@@ -397,7 +397,7 @@ void test_clask_request_uri_param() {
       .args = {},
     },
     {
-      .result = true,
+      .result = false,
       .path = "/foo",
       .args = {},
     },
@@ -484,6 +484,23 @@ void test_clask_root_route_match() {
   auto miss = s.test_match("GET", "/root", [&](const clask::func_t& /*fn*/, const std::vector<std::string>& /*args*/) {
   });
   _ok(miss == false, R"(miss == false)");
+}
+
+void test_clask_route_without_handler() {
+  auto s = clask::server();
+  s.GET("/foo/bar", [](clask::request&) { return "child"; });
+  bool called = false;
+  auto matched = s.test_match("GET", "/foo", [&](const clask::func_t&, const std::vector<std::string>&) {
+    called = true;
+  });
+  _ok(!matched, "intermediate route without a handler does not match");
+  _ok(!called, "do not dispatch an empty handler");
+  s.static_dir("/", "./public", false);
+  matched = s.test_match("GET", "/foo", [&](const clask::func_t& fn, const std::vector<std::string>&) {
+    _ok(fn.prefix_match, "fall back to the registered static handler");
+    called = true;
+  });
+  _ok(matched && called, "intermediate route preserves static fallback");
 }
 
 void test_clask_literal_route_priority() {
@@ -1290,6 +1307,7 @@ int main() {
   subtest("test_clask_query_route_match", test_clask_query_route_match);
   subtest("test_clask_root_route_match", test_clask_root_route_match);
   subtest("test_clask_literal_route_priority", test_clask_literal_route_priority);
+  subtest("test_clask_route_without_handler", test_clask_route_without_handler);
   subtest("test_clask_route_register_after_child", test_clask_route_register_after_child);
   subtest("test_clask_static_dir_route_match", test_clask_static_dir_route_match);
   subtest("test_clask_non_root_static_dir_route_match", test_clask_non_root_static_dir_route_match);
