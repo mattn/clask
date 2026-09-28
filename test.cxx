@@ -804,6 +804,30 @@ void test_clask_connection_tokens() {
   }
 }
 
+void test_clask_pipelined_requests() {
+  for (int length : {-1, 0, 3, 20000}) {
+    int fds[2];
+    if (!make_socket_pair(fds)) {
+      _ok(false, "create socket pair");
+      return;
+    }
+    const std::string body(length > 0 ? length : 0, 'x');
+    std::string wire = "POST /first HTTP/1.1\r\nHost: localhost\r\n";
+    if (length >= 0) wire += "Content-Length: " + std::to_string(length) + "\r\n";
+    wire += "\r\n" + body + "GET /second HTTP/1.1\r\nHost: localhost\r\n\r\n";
+    _ok(socket_write(fds[0], wire.data(), wire.size()) == (ssize_t) wire.size(), "write pipelined requests");
+    shutdown(fds[0], SHUT_WR);
+    auto first = clask::read_request_from_socket(fds[1]);
+    auto second = clask::read_request_from_socket(fds[1]);
+    _ok(first.ok && first.req->uri == "/first" && first.req->body == body,
+        "first request body is bounded, length %d", length);
+    _ok(second.ok && second.req->uri == "/second" && second.req->body.empty(),
+        "second request remains readable, length %d", length);
+    closesocket(fds[0]);
+    closesocket(fds[1]);
+  }
+}
+
 void test_clask_read_request_content_length_bounds_body() {
   int fds[2];
   auto socket_result = make_socket_pair(fds);
@@ -1319,6 +1343,7 @@ int main() {
   subtest("test_clask_read_request_invalid_content_length", test_clask_read_request_invalid_content_length);
   subtest("test_clask_read_request_conflicting_content_length", test_clask_read_request_conflicting_content_length);
   subtest("test_clask_read_request_content_length_bounds_body", test_clask_read_request_content_length_bounds_body);
+  subtest("test_clask_pipelined_requests", test_clask_pipelined_requests);
   subtest("test_clask_serve_file_if_modified_since", test_clask_serve_file_if_modified_since);
   subtest("test_clask_serve_file_csv_content_type", test_clask_serve_file_csv_content_type);
   subtest("test_clask_head_route_match", test_clask_head_route_match);
