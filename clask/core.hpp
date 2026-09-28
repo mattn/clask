@@ -770,8 +770,9 @@ inline std::string part::filename() {
     }
     if (sub.size() >= 10 && sub.substr(0, 10) == "filename*=") {
       sub = sub.substr(10);
-      for (auto& c : sub) c = (char) std::tolower(static_cast<unsigned char>(c));
-      if (sub.size() >= 7 && sub.substr(0, 7) == "utf-8''") {
+      auto prefix = sub.substr(0, 7);
+      for (auto& c : prefix) c = (char) std::tolower(static_cast<unsigned char>(c));
+      if (prefix == "utf-8''") {
         sub = url_decode(sub.substr(7));
         trim_string(sub, "\"");
         return sub;

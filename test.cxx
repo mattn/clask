@@ -282,6 +282,12 @@ void test_clask_multipart_header_case() {
 }
 
 void test_clask_part_unquoted_last_param() {
+  for (const auto& encoding : {"UTF-8", "utf-8", "UtF-8"}) {
+    clask::part p;
+    p.headers.emplace_back("Content-Disposition",
+        std::string("form-data; filename*=") + encoding + "''My%20Report.TXT");
+    _ok(p.filename() == "My Report.TXT", "preserve filename case with charset %s", encoding);
+  }
   {
     clask::part p;
     p.headers.emplace_back("Content-Disposition", "form-data; name=field1");
