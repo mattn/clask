@@ -329,6 +329,19 @@ void test_clask_url_encode() {
 void test_clask_url_decode() {
   _ok(clask::url_decode("hello%20world") == "hello world", "escaped space is decoded");
   _ok(clask::url_decode("%あ") == "%あ", "non-hex escape is preserved");
+  for (const auto& suffix : {"a", "%", "%2", "%GG", "%2f", "%00"}) {
+    std::string input(4096, 'a');
+    input += suffix;
+    input.shrink_to_fit();
+    std::string expected(4096, 'a');
+    if (std::string(suffix) == "%2f") expected += '/';
+    else if (std::string(suffix) == "%00") expected += '\0';
+    else expected += suffix;
+    _ok(clask::url_decode(input) == expected, "decode suffix %s within bounds", suffix);
+  }
+  _ok(clask::url_decode("").empty(), "decode empty string");
+  const std::string binary("a\0b%20c", 7);
+  _ok(clask::url_decode(binary) == std::string("a\0b c", 5), "preserve embedded null bytes");
 }
 
 void test_clask_request_cookie_value() {

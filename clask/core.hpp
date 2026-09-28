@@ -706,18 +706,18 @@ inline std::string url_encode(const std::string &value, bool escape_slash = true
 
 inline std::string url_decode(const std::string &s) {
   std::string ret;
-  const char* p = s.c_str();
-  while (*p) {
-    auto hi_char = static_cast<unsigned char>(p[1]);
-    auto lo_char = static_cast<unsigned char>(p[2]);
-    if (*p == '%' && p[1] && p[2] && std::isxdigit(hi_char) && std::isxdigit(lo_char)) {
-      const int hi = p[1] - (p[1] <= '9' ? '0' : (p[1] <= 'F' ? 'A' : 'a') - 10);
-      const int lo = p[2] - (p[2] <= '9' ? '0' : (p[2] <= 'F' ? 'A' : 'a') - 10);
+  ret.reserve(s.size());
+  for (size_t i = 0; i < s.size(); ++i) {
+    if (s[i] == '%' && s.size() - i >= 3
+        && std::isxdigit(static_cast<unsigned char>(s[i + 1]))
+        && std::isxdigit(static_cast<unsigned char>(s[i + 2]))) {
+      const int hi = s[i + 1] - (s[i + 1] <= '9' ? '0' : (s[i + 1] <= 'F' ? 'A' : 'a') - 10);
+      const int lo = s[i + 2] - (s[i + 2] <= '9' ? '0' : (s[i + 2] <= 'F' ? 'A' : 'a') - 10);
       ret += static_cast<char>(16 * hi + lo);
-      p += 3;
+      i += 2;
       continue;
     }
-    ret += *p++;
+    ret += s[i];
   }
   return ret;
 }
