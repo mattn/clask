@@ -572,6 +572,7 @@ inline void run_server_event_loop(
       std::forward<HandleConnectionFn>(handle_connection));
 
   while (true) {
+    drain_completed_connections(runtime);
     auto wait_result = wait_socket_events(server_fd, runtime.idle_connections, 100, runtime.wakeup.fd());
     // Clear the notification before draining its queue so a concurrent
     // completion is either consumed now or leaves a notification for next time.
