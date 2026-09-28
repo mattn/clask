@@ -1552,6 +1552,249 @@ void test_clask_static_path_resolution() {
   }
 }
 
+void test_clask_parse_proxy_upstream() {
+  {
+    auto u = clask::parse_proxy_upstream("http://127.0.0.1:9000/v1/");
+    _ok(u.host == "127.0.0.1", "upstream host");
+    _ok(u.port == "9000", "upstream port");
+    _ok(u.host_header == "127.0.0.1:9000", "upstream host header");
+    _ok(u.base_path == "/v1/", "upstream base path");
+  }
+  {
+    auto u = clask::parse_proxy_upstream("http://example.com");
+    _ok(u.host == "example.com", "host without port");
+    _ok(u.port == "80", "default port");
+    _ok(u.base_path == "/", "default base path");
+  }
+  {
+    auto u = clask::parse_proxy_upstream("http://[::1]:8080/api");
+    _ok(u.host == "::1", "ipv6 host");
+    _ok(u.port == "8080", "ipv6 port");
+    _ok(u.base_path == "/api", "ipv6 base path");
+  }
+  for (auto bad : {"https://example.com/", "example.com", "http://:80/", "http://host:x/", "http://[::1/"}) {
+    auto thrown = false;
+    try {
+      clask::parse_proxy_upstream(bad);
+    } catch (const std::invalid_argument&) {
+      thrown = true;
+    }
+    _ok(thrown, "rejects %s", bad);
+  }
+}
+
+void test_clask_proxy_target_path() {
+  auto t = clask::proxy_target_path("/api/users?id=1", "/api/", "/v1/");
+  _ok(t && *t == "/v1/users?id=1", "strips mount and keeps query");
+  t = clask::proxy_target_path("/api", "/api/", "/");
+  _ok(t && *t == "/", "mount without trailing slash");
+  t = clask::proxy_target_path("/api/users", "/api", "/v1");
+  _ok(t && *t == "/v1/users", "mount without slash joins cleanly");
+  t = clask::proxy_target_path("/api/a%20b", "/api/", "/");
+  _ok(t && *t == "/a%20b", "keeps raw encoding");
+  t = clask::proxy_target_path("/other", "/api/", "/");
+  _ok(!t, "outside mount");
+  t = clask::proxy_target_path("/api/../secret", "/api/", "/");
+  _ok(!t, "rejects parent reference");
+  t = clask::proxy_target_path("/api/%2e%2e/secret", "/api/", "/");
+  _ok(!t, "rejects encoded parent reference");
+  t = clask::proxy_target_path("/api/a..b", "/api/", "/");
+  _ok(t && *t == "/a..b", "dots inside a segment are allowed");
+}
+
+// Accepts one connection on a loopback port, captures the request and
+// answers with a canned response.
+struct test_upstream {
+  int fd = -1;
+  int port = 0;
+  std::string received;
+  std::thread th;
+
+  bool start(const std::string& response) {
+    clask::initialize_network_runtime();
+    fd = (int) ::socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) return false;
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    socklen_t addrlen = sizeof(addr);
+    if (bind(fd, (sockaddr*) &addr, addrlen) != 0
+        || getsockname(fd, (sockaddr*) &addr, &addrlen) != 0
+        || listen(fd, 1) != 0) {
+      return false;
+    }
+    port = ntohs(addr.sin_port);
+    th = std::thread([this, response]() {
+      auto c = (int) accept(fd, nullptr, nullptr);
+      if (c < 0) return;
+      char buf[4096];
+      while (true) {
+        auto eoh = received.find("\r\n\r\n");
+        if (eoh != std::string::npos) {
+          auto cl = received.find("Content-Length: ");
+          size_t len = cl == std::string::npos ? 0 : std::stoul(received.substr(cl + 16));
+          if (received.size() >= eoh + 4 + len) break;
+        }
+        auto n = recv(c, buf, sizeof(buf), 0);
+        if (n <= 0) break;
+        received.append(buf, (size_t) n);
+      }
+      send(c, response.data(), (int) response.size(), 0);
+      closesocket(c);
+    });
+    return true;
+  }
+
+  ~test_upstream() {
+    if (th.joinable()) th.join();
+    if (fd >= 0) closesocket(fd);
+  }
+};
+
+static std::string run_proxy_handler(
+    clask::server_t& s, clask::request req) {
+  int fds[2];
+  if (!make_socket_pair(fds)) {
+    return "";
+  }
+  auto matched = s.test_match(req.method, req.uri, [&](const clask::func_t& fn, const std::vector<std::string>& args) {
+    clask::response_writer resp(fds[1], 200);
+    resp.head_only = req.method == "HEAD";
+    req.args = args;
+    fn.f_writer(resp, req);
+  });
+  closesocket(fds[1]);
+  std::string out;
+  char buf[4096];
+  ssize_t n;
+  while ((n = recv(fds[0], buf, sizeof(buf), 0)) > 0) {
+    out.append(buf, (size_t) n);
+  }
+  closesocket(fds[0]);
+  return matched ? out : "";
+}
+
+void test_clask_reverse_proxy_forwards_request() {
+  test_upstream up;
+  if (!up.start(
+      "HTTP/1.1 201 Created\r\n"
+      "Content-Type: application/json\r\n"
+      "Set-Cookie: a=1\r\n"
+      "Set-Cookie: b=2\r\n"
+      "Connection: close, X-Hop\r\n"
+      "X-Hop: drop\r\n"
+      "Content-Length: 11\r\n\r\n"
+      "{\"ok\":true}")) {
+    _ok(false, "start upstream");
+    return;
+  }
+  auto s = clask::server();
+  s.reverse_proxy("/api/", "http://127.0.0.1:" + std::to_string(up.port) + "/v1/");
+
+  clask::request req(
+      "POST", "/api/items?x=1", "/api/items", {},
+      {
+        {"Host", "front.example"},
+        {"Content-Type", "text/plain"},
+        {"Content-Length", "5"},
+        {"Connection", "keep-alive, X-Secret"},
+        {"X-Secret", "hidden"},
+        {"X-Forwarded-For", "10.0.0.1"},
+        {"X-Forwarded-Host", "evil.example"},
+        {"X-Forwarded-Proto", "https"},
+      },
+      "hello");
+  req.remote_addr = "192.168.0.2";
+  auto out = run_proxy_handler(s, std::move(req));
+  up.th.join();
+
+  const auto& in = up.received;
+  _ok(in.find("POST /v1/items?x=1 HTTP/1.1\r\n") == 0, "request line is rewritten");
+  _ok(in.find("Host: 127.0.0.1:" + std::to_string(up.port) + "\r\n") != std::string::npos, "host is upstream");
+  _ok(in.find("X-Forwarded-Host: front.example\r\n") != std::string::npos, "x-forwarded-host");
+  _ok(in.find("X-Forwarded-For: 10.0.0.1, 192.168.0.2\r\n") != std::string::npos, "x-forwarded-for is appended");
+  _ok(in.find("X-Forwarded-Proto: http\r\n") != std::string::npos, "x-forwarded-proto");
+  _ok(in.find("evil.example") == std::string::npos, "client x-forwarded-host is ignored");
+  _ok(in.find("https") == std::string::npos, "client x-forwarded-proto is ignored");
+  _ok(in.find("Content-Type: text/plain\r\n") != std::string::npos, "end-to-end header is kept");
+  _ok(in.find("X-Secret") == std::string::npos, "connection-listed header is dropped");
+  _ok(in.find("keep-alive") == std::string::npos, "client connection header is dropped");
+  _ok(in.find("Connection: close\r\n") != std::string::npos, "upstream connection closes");
+  _ok(in.find("Content-Length: 5\r\n") != std::string::npos, "content-length is recomputed");
+  _ok(in.find("\r\n\r\nhello") != std::string::npos, "body is forwarded");
+
+  _ok(out.find("HTTP/1.1 201 Created\r\n") == 0, "status is relayed");
+  _ok(out.find("Set-Cookie: a=1\r\n") != std::string::npos, "first set-cookie");
+  _ok(out.find("Set-Cookie: b=2\r\n") != std::string::npos, "second set-cookie");
+  _ok(out.find("X-Hop") == std::string::npos, "upstream connection-listed header is dropped");
+  _ok(out.find("Connection: Close\r\n") != std::string::npos, "client connection closes");
+  _ok(out.find("\r\n\r\n{\"ok\":true}") != std::string::npos, "body is relayed");
+}
+
+void test_clask_reverse_proxy_chunked_response() {
+  test_upstream up;
+  if (!up.start(
+      "HTTP/1.1 100 Continue\r\n\r\n"
+      "HTTP/1.1 200 OK\r\n"
+      "Transfer-Encoding: chunked\r\n\r\n"
+      "5\r\nhello\r\n0\r\n\r\n")) {
+    _ok(false, "start upstream");
+    return;
+  }
+  auto s = clask::server();
+  s.reverse_proxy("/", "http://127.0.0.1:" + std::to_string(up.port));
+  auto out = run_proxy_handler(s, clask::request("GET", "/", "/", {}, {{"Expect", "100-continue"}}, ""));
+  up.th.join();
+  _ok(up.received.find("GET / HTTP/1.1\r\n") == 0, "root is forwarded");
+  _ok(up.received.find("Expect") == std::string::npos, "expect is dropped");
+  _ok(up.received.find("Content-Length") == std::string::npos, "no content-length for bodiless GET");
+  _ok(out.find("100 Continue") == std::string::npos, "interim response is skipped");
+  _ok(out.find("HTTP/1.1 200 OK\r\n") == 0, "final status");
+  _ok(out.find("Transfer-Encoding: chunked\r\n") != std::string::npos, "chunked framing is kept");
+  _ok(out.find("\r\n\r\n5\r\nhello\r\n0\r\n\r\n") != std::string::npos, "chunked body is relayed verbatim");
+}
+
+void test_clask_reverse_proxy_unknown_status() {
+  test_upstream up;
+  if (!up.start("HTTP/1.1 599 Custom\r\nContent-Length: 2\r\n\r\nok")) {
+    _ok(false, "start upstream");
+    return;
+  }
+  auto s = clask::server();
+  s.reverse_proxy("/", "http://127.0.0.1:" + std::to_string(up.port));
+  auto out = run_proxy_handler(s, clask::request("GET", "/", "/", {}, {}, ""));
+  up.th.join();
+  _ok(out.find("HTTP/1.1 599 ") == 0, "unknown status is relayed");
+  _ok(out.find("\r\n\r\nok") != std::string::npos, "body of unknown status is relayed");
+  _ok(clask::status_codes.count(599) == 0, "status table is not modified");
+}
+
+void test_clask_reverse_proxy_errors() {
+  auto s = clask::server();
+  // Bind a port without listening so connections to it are refused.
+  clask::initialize_network_runtime();
+  auto fd = (int) ::socket(AF_INET, SOCK_STREAM, 0);
+  sockaddr_in addr{};
+  addr.sin_family = AF_INET;
+  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  socklen_t addrlen = sizeof(addr);
+  bind(fd, (sockaddr*) &addr, addrlen);
+  getsockname(fd, (sockaddr*) &addr, &addrlen);
+  auto port = ntohs(addr.sin_port);
+  s.reverse_proxy("/api/", "http://127.0.0.1:" + std::to_string(port) + "/");
+  auto out = run_proxy_handler(s, clask::request("GET", "/api/x", "/api/x", {}, {}, ""));
+  _ok(out.find("HTTP/1.1 502 Bad Gateway\r\n") == 0, "unreachable upstream is 502");
+  closesocket(fd);
+
+  out = run_proxy_handler(s, clask::request("GET", "/api/../etc", "/api/../etc", {}, {}, ""));
+  _ok(out.find("HTTP/1.1 404") == 0, "parent reference is 404");
+
+  auto matched = s.test_match("POST", "/api/x", [](const clask::func_t&, const std::vector<std::string>&) {});
+  _ok(matched, "POST is routed");
+  matched = s.test_match("QUERY", "/api/x", [](const clask::func_t&, const std::vector<std::string>&) {});
+  _ok(matched, "QUERY is routed");
+}
+
 int main() {
   subtest("test_clask_connection_tokens", test_clask_connection_tokens);
   subtest("test_clask_empty_parameters", test_clask_empty_parameters);
@@ -1608,5 +1851,11 @@ int main() {
   subtest("test_clask_ready_connection_batch", test_clask_ready_connection_batch);
   subtest("test_clask_fluent_server_setup", test_clask_fluent_server_setup);
   subtest("test_clask_static_path_resolution", test_clask_static_path_resolution);
+  subtest("test_clask_parse_proxy_upstream", test_clask_parse_proxy_upstream);
+  subtest("test_clask_proxy_target_path", test_clask_proxy_target_path);
+  subtest("test_clask_reverse_proxy_forwards_request", test_clask_reverse_proxy_forwards_request);
+  subtest("test_clask_reverse_proxy_chunked_response", test_clask_reverse_proxy_chunked_response);
+  subtest("test_clask_reverse_proxy_unknown_status", test_clask_reverse_proxy_unknown_status);
+  subtest("test_clask_reverse_proxy_errors", test_clask_reverse_proxy_errors);
   return done_testing();
 }
