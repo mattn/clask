@@ -384,7 +384,7 @@ void test_clask_request_uri_param() {
       .args = {},
     },
     {
-      .result = true,
+      .result = false,
       .path = "/foo",
       .args = {},
     },
