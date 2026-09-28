@@ -1004,6 +1004,55 @@ void test_clask_serve_file_head_request() {
   remove(path.c_str());
 }
 
+void test_clask_partial_response_writes() {
+#ifndef _WIN32
+  for (int kind = 0; kind < 4; ++kind) {
+    int fds[2];
+    if (!make_socket_pair(fds)) {
+      _ok(false, "create socket pair");
+      return;
+    }
+    int buffer_size = 4096;
+    setsockopt(fds[1], SOL_SOCKET, SO_SNDBUF, &buffer_size, sizeof(buffer_size));
+    clask::set_socket_timeout(fds[1], SO_SNDTIMEO, 500);
+    const std::string body(1024 * 1024, 'x');
+    std::string output;
+    std::thread reader([&]() {
+      // Force the first send to time out after making partial progress.
+      std::this_thread::sleep_for(std::chrono::milliseconds(750));
+      char buf[8192];
+      ssize_t n;
+      while ((n = recv(fds[0], buf, sizeof(buf), 0)) > 0) {
+        output.append(buf, (size_t) n);
+      }
+    });
+    clask::func_t fn{};
+    if (kind == 0) fn.f_string = [&](clask::request&) { return body; };
+    if (kind == 1) fn.f_response = [&](clask::request&) { return clask::response{200, body, {}}; };
+    if (kind == 2) fn.f_writer = [&](clask::response_writer& writer, clask::request&) {
+      writer.write(body);
+    };
+    if (kind == 3) fn.f_writer = [&](clask::response_writer& writer, clask::request&) {
+      auto bytes = body;
+      writer.write(bytes.data(), bytes.size());
+    };
+    clask::request req("GET", "/", "/", {}, {}, "");
+    bool keep_alive = false;
+    fn.handle(fds[1], req, keep_alive);
+    shutdown(fds[1], SHUT_WR);
+    reader.join();
+    auto split = output.find("\r\n\r\n");
+    _ok(split != std::string::npos && output.substr(split + 4) == body,
+        "send complete response after a partial write, handler %d", kind);
+    closesocket(fds[0]);
+    keep_alive = true;
+    fn.handle(fds[1], req, keep_alive);
+    _ok(!keep_alive, "failed send cannot keep the connection alive");
+    closesocket(fds[1]);
+  }
+#endif
+}
+
 void test_clask_sse_writer_output() {
   int fds[2];
   _ok(make_socket_pair(fds) == true, R"(make_socket_pair(fds) == true)");
@@ -1380,6 +1429,7 @@ int main() {
   subtest("test_clask_head_route_match", test_clask_head_route_match);
   subtest("test_clask_serve_file_head_request", test_clask_serve_file_head_request);
   subtest("test_clask_sse_writer_output", test_clask_sse_writer_output);
+  subtest("test_clask_partial_response_writes", test_clask_partial_response_writes);
   subtest("test_clask_chunked_writer_output", test_clask_chunked_writer_output);
   subtest("test_clask_response_writer_end_keeps_socket_open", test_clask_response_writer_end_keeps_socket_open);
   subtest("test_clask_static_dir_custom_404_page", test_clask_static_dir_custom_404_page);

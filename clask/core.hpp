@@ -23,6 +23,7 @@
 #include <atomic>
 #include <filesystem>
 #include <chrono>
+#include <limits>
 
 #ifdef _WIN32
 # include <ws2tcpip.h>
@@ -229,6 +230,25 @@ inline socket_wait_result wait_socket_events(
   return result;
 }
 
+inline bool send_all(int s, const char* data, size_t size) {
+  while (size > 0) {
+    const auto chunk = (int) std::min(size, (size_t) std::numeric_limits<int>::max());
+    auto sent = send(s, data, chunk, MSG_NOSIGNAL);
+    if (sent < 0) {
+#ifdef _WIN32
+      if (WSAGetLastError() == WSAEINTR) continue;
+#else
+      if (errno == EINTR) continue;
+#endif
+      return false;
+    }
+    if (sent == 0) return false;
+    data += sent;
+    size -= (size_t) sent;
+  }
+  return true;
+}
+
 inline void send_service_unavailable_response(int s) {
   static const std::string busy_response =
       "HTTP/1.1 503 Service Unavailable\r\n"
@@ -236,7 +256,7 @@ inline void send_service_unavailable_response(int s) {
       "Connection: Close\r\n"
       "Content-Length: 19\r\n\r\n"
       "Service Unavailable";
-  send(s, busy_response.data(), (int) busy_response.size(), MSG_NOSIGNAL);
+  send_all(s, busy_response.data(), busy_response.size());
 }
 
 inline bool accept_connection(
@@ -517,7 +537,7 @@ inline void requeue_readable_idle_connections(
   }
 }
 
-inline void send_text_response(
+inline bool send_text_response(
     int s,
     int code,
     const std::string& reason,
@@ -533,7 +553,8 @@ inline void send_text_response(
   if (!head_only) {
     os << body;
   }
-  send(s, os.str().data(), (int) os.str().size(), MSG_NOSIGNAL);
+  const auto output = os.str();
+  return send_all(s, output.data(), output.size());
 }
 
 typedef enum class _log_level {ERR, WARN, INFO, DEBUG} log_level;
@@ -894,12 +915,12 @@ static std::unordered_map<int, std::string> status_codes = {
   { 511, "Network Authentication Required" },
 };
 
-inline void send_status_text_response(
+inline bool send_status_text_response(
     int s,
     int code,
     bool keep_alive,
     bool head_only = false) {
-  send_text_response(s, code, status_codes[code], status_codes[code], keep_alive, head_only);
+  return send_text_response(s, code, status_codes[code], status_codes[code], keep_alive, head_only);
 }
 
 static std::unordered_map<std::string, std::string> content_types = {
@@ -926,6 +947,7 @@ private:
   std::vector<header> headers;
   int s;
   bool header_out;
+  bool failed = false;
 public:
   response_writer(int s, int code) : s(s), header_out(false), code(code) { }
   int code;
@@ -1041,13 +1063,14 @@ inline void response_writer::write(char* buf, size_t n) {
   if (!header_out) {
     write_headers();
   }
-  if (head_only) {
+  if (head_only || failed) {
     return;
   }
-  send(s, buf, (int) n, MSG_NOSIGNAL);
+  failed = !send_all(s, buf, n);
 }
 
 inline void response_writer::write_headers() {
+  if (failed) return;
   header_out = true;
   std::string buf;
   buf.reserve(256);
@@ -1063,17 +1086,17 @@ inline void response_writer::write_headers() {
     buf += "\r\n";
   }
   buf += "\r\n";
-  send(s, buf.data(), (int) buf.size(), MSG_NOSIGNAL);
+  failed = !send_all(s, buf.data(), buf.size());
 }
 
 inline void response_writer::write(const std::string& content) {
   if (!header_out) {
     write_headers();
   }
-  if (head_only) {
+  if (head_only || failed) {
     return;
   }
-  send(s, content.data(), (int) content.size(), MSG_NOSIGNAL);
+  failed = !send_all(s, content.data(), content.size());
 }
 
 inline void response_writer::end() {
@@ -1446,7 +1469,7 @@ inline int func_t::handle(int s, request& req, bool& keep_alive) const {
     if (!head_only) {
       hdr += res;
     }
-    send(s, hdr.data(), (int) hdr.size(), MSG_NOSIGNAL);
+    if (!send_all(s, hdr.data(), hdr.size())) keep_alive = false;
   } else if (f_writer != nullptr) {
     response_writer writer(s, 200);
     writer.head_only = head_only;
@@ -1486,7 +1509,7 @@ inline int func_t::handle(int s, request& req, bool& keep_alive) const {
     if (!head_only) {
       hdr += res.content;
     }
-    send(s, hdr.data(), (int) hdr.size(), MSG_NOSIGNAL);
+    if (!send_all(s, hdr.data(), hdr.size())) keep_alive = false;
     code = res.code;
   }
   return code;
@@ -1518,7 +1541,9 @@ inline bool dispatch_request(
 #ifndef CLASK_DISABLE_LOGS
     CLASK_LOG(clask::log_level::WARN) << remote << " " << 404 << " " << req.method << " " << req.uri;
 #endif
-    send_status_text_response(s, 404, keep_alive, req.method == "HEAD");
+    if (!send_status_text_response(s, 404, keep_alive, req.method == "HEAD")) {
+      keep_alive = false;
+    }
   }
   return keep_alive;
 }
