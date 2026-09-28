@@ -958,15 +958,17 @@ private:
   response_writer w;
 public:
   chunked_writer(response_writer& w) : w(w) {
-    w.set_header("Transfer-Encoding", "chunked");
+    this->w.set_header("Transfer-Encoding", "chunked");
   };
   void write(const std::string& s) {
+    if (s.empty()) return;
     std::stringstream shex;
     shex << std::hex << s.size();
     w.write(shex.str() + "\r\n");
     w.write(s + "\r\n");
   }
   void write(char* ptr, size_t len) {
+    if (len == 0) return;
     std::stringstream shex;
     shex << std::hex << len;
     w.write(shex.str() + "\r\n");
