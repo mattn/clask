@@ -91,6 +91,95 @@ struct completed_connection {
   bool keep_alive;
 };
 
+// A nonblocking socket pair lets worker completions interrupt poll/select.
+class event_loop_wakeup {
+  int reader_ = -1;
+  int writer_ = -1;
+public:
+  event_loop_wakeup() = default;
+  event_loop_wakeup(const event_loop_wakeup&) = delete;
+  event_loop_wakeup& operator=(const event_loop_wakeup&) = delete;
+  ~event_loop_wakeup() {
+    if (reader_ >= 0) closesocket(reader_);
+    if (writer_ >= 0) closesocket(writer_);
+  }
+  int fd() const { return reader_; }
+  void open() {
+    if (reader_ >= 0) return;
+#ifdef _WIN32
+    auto listener = socket(AF_INET, SOCK_STREAM, 0);
+    if (listener == INVALID_SOCKET) throw std::runtime_error("wakeup socket");
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    int size = sizeof(addr);
+    if (bind(listener, (sockaddr*) &addr, size) != 0
+        || getsockname(listener, (sockaddr*) &addr, &size) != 0
+        || listen(listener, 1) != 0) {
+      closesocket(listener);
+      throw std::runtime_error("wakeup listener");
+    }
+    writer_ = (int) socket(AF_INET, SOCK_STREAM, 0);
+    if (writer_ < 0 || connect(writer_, (sockaddr*) &addr, size) != 0) {
+      closesocket(listener);
+      throw std::runtime_error("wakeup connect");
+    }
+    reader_ = (int) accept(listener, nullptr, nullptr);
+    closesocket(listener);
+    if (reader_ < 0) throw std::runtime_error("wakeup accept");
+    const int nodelay = 1;
+    if (setsockopt(writer_, IPPROTO_TCP, TCP_NODELAY,
+        (const char*) &nodelay, sizeof(nodelay)) != 0) {
+      throw std::runtime_error("wakeup nodelay");
+    }
+    u_long nonblocking = 1;
+    if (ioctlsocket(reader_, FIONBIO, &nonblocking) != 0
+        || ioctlsocket(writer_, FIONBIO, &nonblocking) != 0) {
+      throw std::runtime_error("wakeup nonblocking");
+    }
+#else
+    int pair[2];
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, pair) != 0) {
+      throw std::runtime_error("wakeup socketpair");
+    }
+    reader_ = pair[0];
+    writer_ = pair[1];
+    for (int fd : pair) {
+      auto flags = fcntl(fd, F_GETFL, 0);
+      if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) != 0) {
+        throw std::runtime_error("wakeup nonblocking");
+      }
+    }
+#endif
+  }
+  void notify() {
+    while (send(writer_, "x", 1, MSG_NOSIGNAL) < 0) {
+#ifdef _WIN32
+      if (WSAGetLastError() == WSAEINTR) continue;
+#else
+      if (errno == EINTR) continue;
+#endif
+      // A full socket is already readable, so another byte is unnecessary.
+      break;
+    }
+  }
+  void drain() {
+    char buf[256];
+    for (;;) {
+      auto n = recv(reader_, buf, sizeof(buf), 0);
+      if (n > 0) continue;
+      if (n < 0) {
+#ifdef _WIN32
+        if (WSAGetLastError() == WSAEINTR) continue;
+#else
+        if (errno == EINTR) continue;
+#endif
+      }
+      break;
+    }
+  }
+};
+
 struct server_runtime_state {
   std::mutex ready_queue_mu;
   std::condition_variable ready_queue_cv;
@@ -99,6 +188,7 @@ struct server_runtime_state {
   std::deque<completed_connection> completed_queue;
   std::unordered_map<int, connection_state> idle_connections;
   std::atomic<size_t> tracked_connections{0};
+  event_loop_wakeup wakeup;
 };
 
 struct server_runtime_config {
@@ -156,7 +246,8 @@ inline bool set_socket_timeout(int s, int optname, int timeout_ms) {
 inline socket_wait_result wait_socket_events(
     int server_fd,
     const std::unordered_map<int, connection_state>& idle_connections,
-    int timeout_ms) {
+    int timeout_ms,
+    int wakeup_fd = -1) {
   socket_wait_result result{
     .server_readable = false,
     .events = {},
@@ -166,6 +257,10 @@ inline socket_wait_result wait_socket_events(
   FD_ZERO(&readfds);
   FD_SET((SOCKET) server_fd, &readfds);
   SOCKET maxfd = (SOCKET) server_fd;
+  if (wakeup_fd >= 0) {
+    FD_SET((SOCKET) wakeup_fd, &readfds);
+    maxfd = std::max(maxfd, (SOCKET) wakeup_fd);
+  }
   for (const auto& conn : idle_connections) {
     auto fd = (SOCKET) conn.second.fd;
     FD_SET(fd, &readfds);
@@ -194,7 +289,7 @@ inline socket_wait_result wait_socket_events(
   }
 #else
   std::vector<pollfd> fds;
-  fds.reserve(idle_connections.size() + 1);
+  fds.reserve(idle_connections.size() + 1 + (wakeup_fd >= 0 ? 1 : 0));
   fds.push_back(pollfd {
     .fd = server_fd,
     .events = POLLIN,
@@ -207,6 +302,10 @@ inline socket_wait_result wait_socket_events(
       .revents = 0,
     });
   }
+  const auto connection_fds = fds.size();
+  if (wakeup_fd >= 0) {
+    fds.push_back(pollfd{wakeup_fd, POLLIN, 0});
+  }
   auto ready = poll(fds.data(), fds.size(), timeout_ms);
   if (ready < 0) {
     if (errno == EINTR) {
@@ -216,7 +315,7 @@ inline socket_wait_result wait_socket_events(
   }
   result.server_readable = ready > 0 && (fds.front().revents & POLLIN);
   result.events.reserve(idle_connections.size());
-  for (size_t i = 1; i < fds.size(); i++) {
+  for (size_t i = 1; i < connection_fds; i++) {
     if (fds[i].revents == 0) {
       continue;
     }
@@ -413,6 +512,22 @@ inline server_runtime_config resolve_server_runtime_config(
   };
 }
 
+inline void complete_connection(
+    server_runtime_state& runtime,
+    connection_state conn,
+    bool keep_alive) {
+  bool notify;
+  {
+    std::lock_guard<std::mutex> lk(runtime.completed_queue_mu);
+    notify = runtime.completed_queue.empty();
+    runtime.completed_queue.push_back(completed_connection{
+      .conn = std::move(conn),
+      .keep_alive = keep_alive,
+    });
+  }
+  if (notify) runtime.wakeup.notify();
+}
+
 template <typename HandleConnectionFn>
 inline void start_worker_pool(
     unsigned int worker_count,
@@ -429,13 +544,7 @@ inline void start_worker_pool(
           runtime.ready_queue.pop_front();
         }
         auto keep_alive = handle_connection(conn.fd, conn.remote);
-        {
-          std::lock_guard<std::mutex> lk(runtime.completed_queue_mu);
-          runtime.completed_queue.push_back(completed_connection{
-            .conn = std::move(conn),
-            .keep_alive = keep_alive,
-          });
-        }
+        complete_connection(runtime, std::move(conn), keep_alive);
       }
     }).detach();
   }
@@ -448,6 +557,7 @@ inline void run_server_event_loop(
     size_t accept_queue_limit,
     server_runtime_state& runtime,
     HandleConnectionFn&& handle_connection) {
+  runtime.wakeup.open();
   start_worker_pool(
       worker_count,
       runtime,
@@ -455,7 +565,11 @@ inline void run_server_event_loop(
 
   while (true) {
     drain_completed_connections(runtime);
-    auto wait_result = wait_socket_events(server_fd, runtime.idle_connections, 100);
+    auto wait_result = wait_socket_events(server_fd, runtime.idle_connections, 100, runtime.wakeup.fd());
+    // Clear the notification before draining its queue so a concurrent
+    // completion is either consumed now or leaves a notification for next time.
+    runtime.wakeup.drain();
+    drain_completed_connections(runtime);
     if (!wait_result.server_readable && wait_result.events.empty()) {
       continue;
     }
