@@ -1700,6 +1700,8 @@ void test_clask_reverse_proxy_forwards_request() {
         {"Connection", "keep-alive, X-Secret"},
         {"X-Secret", "hidden"},
         {"X-Forwarded-For", "10.0.0.1"},
+        {"X-Forwarded-Host", "evil.example"},
+        {"X-Forwarded-Proto", "https"},
       },
       "hello");
   req.remote_addr = "192.168.0.2";
@@ -1712,6 +1714,8 @@ void test_clask_reverse_proxy_forwards_request() {
   _ok(in.find("X-Forwarded-Host: front.example\r\n") != std::string::npos, "x-forwarded-host");
   _ok(in.find("X-Forwarded-For: 10.0.0.1, 192.168.0.2\r\n") != std::string::npos, "x-forwarded-for is appended");
   _ok(in.find("X-Forwarded-Proto: http\r\n") != std::string::npos, "x-forwarded-proto");
+  _ok(in.find("evil.example") == std::string::npos, "client x-forwarded-host is ignored");
+  _ok(in.find("https") == std::string::npos, "client x-forwarded-proto is ignored");
   _ok(in.find("Content-Type: text/plain\r\n") != std::string::npos, "end-to-end header is kept");
   _ok(in.find("X-Secret") == std::string::npos, "connection-listed header is dropped");
   _ok(in.find("keep-alive") == std::string::npos, "client connection header is dropped");
@@ -1748,6 +1752,21 @@ void test_clask_reverse_proxy_chunked_response() {
   _ok(out.find("HTTP/1.1 200 OK\r\n") == 0, "final status");
   _ok(out.find("Transfer-Encoding: chunked\r\n") != std::string::npos, "chunked framing is kept");
   _ok(out.find("\r\n\r\n5\r\nhello\r\n0\r\n\r\n") != std::string::npos, "chunked body is relayed verbatim");
+}
+
+void test_clask_reverse_proxy_unknown_status() {
+  test_upstream up;
+  if (!up.start("HTTP/1.1 599 Custom\r\nContent-Length: 2\r\n\r\nok")) {
+    _ok(false, "start upstream");
+    return;
+  }
+  auto s = clask::server();
+  s.reverse_proxy("/", "http://127.0.0.1:" + std::to_string(up.port));
+  auto out = run_proxy_handler(s, clask::request("GET", "/", "/", {}, {}, ""));
+  up.th.join();
+  _ok(out.find("HTTP/1.1 599 ") == 0, "unknown status is relayed");
+  _ok(out.find("\r\n\r\nok") != std::string::npos, "body of unknown status is relayed");
+  _ok(clask::status_codes.count(599) == 0, "status table is not modified");
 }
 
 void test_clask_reverse_proxy_errors() {
@@ -1836,6 +1855,7 @@ int main() {
   subtest("test_clask_proxy_target_path", test_clask_proxy_target_path);
   subtest("test_clask_reverse_proxy_forwards_request", test_clask_reverse_proxy_forwards_request);
   subtest("test_clask_reverse_proxy_chunked_response", test_clask_reverse_proxy_chunked_response);
+  subtest("test_clask_reverse_proxy_unknown_status", test_clask_reverse_proxy_unknown_status);
   subtest("test_clask_reverse_proxy_errors", test_clask_reverse_proxy_errors);
   return done_testing();
 }

@@ -1057,12 +1057,19 @@ static std::unordered_map<int, std::string> status_codes = {
   { 511, "Network Authentication Required" },
 };
 
+// Unlike status_codes[code], this never inserts into the shared table, so it
+// is safe to call from worker threads with arbitrary codes.
+inline std::string status_text(int code) {
+  auto it = status_codes.find(code);
+  return it == status_codes.end() ? std::string("Unknown") : it->second;
+}
+
 inline bool send_status_text_response(
     int s,
     int code,
     bool keep_alive,
     bool head_only = false) {
-  return send_text_response(s, code, status_codes[code], status_codes[code], keep_alive, head_only);
+  return send_text_response(s, code, status_text(code), status_text(code), keep_alive, head_only);
 }
 
 static std::unordered_map<std::string, std::string> content_types = {
@@ -1166,7 +1173,7 @@ inline void write_status_text_response(
     response_writer& resp,
     int code,
     const std::vector<header>& extra_headers = {}) {
-  write_plain_text_response(resp, code, status_codes[code], extra_headers);
+  write_plain_text_response(resp, code, status_text(code), extra_headers);
 }
 
 inline std::string form_url_decode(std::string s) {
@@ -1225,7 +1232,7 @@ inline void response_writer::write_headers() {
   buf += "HTTP/1.1 ";
   buf += std::to_string(code);
   buf += " ";
-  buf += status_codes[code];
+  buf += status_text(code);
   buf += "\r\n";
   for (auto& h : headers) {
     buf += h.first;
@@ -1643,7 +1650,7 @@ inline int func_t::handle(int s, request& req, bool& keep_alive) const {
     hdr += "HTTP/1.1 ";
     hdr += std::to_string(res.code);
     hdr += " ";
-    hdr += status_codes[res.code];
+    hdr += status_text(res.code);
     hdr += "\r\n";
     for (auto& h : res.headers) {
       auto key = camelize(h.first);
@@ -2316,7 +2323,7 @@ inline std::string build_proxy_request(
     const proxy_upstream& upstream,
     const std::string& target) {
   auto tokens = proxy_connection_tokens(req.headers);
-  std::string forwarded_for, forwarded_host, forwarded_proto, original_host;
+  std::string forwarded_for, original_host;
   std::string out;
   out.reserve(512 + req.body.size());
   out += req.method + " " + target + " HTTP/1.1\r\n";
@@ -2328,12 +2335,16 @@ inline std::string build_proxy_request(
       original_host = h.second;
       continue;
     }
+    // Earlier X-Forwarded-For entries come from the client and may be forged;
+    // only the last one, appended below, is observed by this proxy.
     if (key == "X-Forwarded-For") {
       forwarded_for += (forwarded_for.empty() ? "" : ", ") + h.second;
       continue;
     }
-    if (key == "X-Forwarded-Host") forwarded_host = h.second;
-    if (key == "X-Forwarded-Proto") forwarded_proto = h.second;
+    // Client supplied values cannot be trusted, so these are always set below.
+    if (key == "X-Forwarded-Host" || key == "X-Forwarded-Proto") {
+      continue;
+    }
     // The body has already been read, so the upstream must not wait for 100-continue.
     if (key == "Content-Length" || key == "Expect" || is_hop_by_hop_header(key, tokens)) {
       continue;
@@ -2346,12 +2357,10 @@ inline std::string build_proxy_request(
   if (!forwarded_for.empty()) {
     out += "X-Forwarded-For: " + forwarded_for + "\r\n";
   }
-  if (forwarded_host.empty() && !original_host.empty()) {
+  if (!original_host.empty()) {
     out += "X-Forwarded-Host: " + original_host + "\r\n";
   }
-  if (forwarded_proto.empty()) {
-    out += "X-Forwarded-Proto: http\r\n";
-  }
+  out += "X-Forwarded-Proto: http\r\n";
   if (!req.body.empty() || req.method == "POST" || req.method == "QUERY") {
     out += "Content-Length: " + std::to_string(req.body.size()) + "\r\n";
   }
@@ -2454,12 +2463,6 @@ inline void proxy_request(
       return;
     }
   }
-  if (status_codes.find(status) == status_codes.end()) {
-    closesocket(s);
-    write_status_text_response(resp, 502);
-    return;
-  }
-
   std::vector<header> upstream_headers;
   for (size_t n = 0; n < num_headers; n++) {
     upstream_headers.emplace_back(

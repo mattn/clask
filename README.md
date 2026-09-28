@@ -39,7 +39,7 @@ s.run();
 ```
 
 - `GET`/`HEAD`/`POST`/`QUERY` requests under the mount path are forwarded.
-- Hop-by-hop headers are removed, `Host` is rewritten to the upstream, and `X-Forwarded-For`/`X-Forwarded-Host`/`X-Forwarded-Proto` are added.
+- Hop-by-hop headers are removed, `Host` is rewritten to the upstream, and `X-Forwarded-For`/`X-Forwarded-Host`/`X-Forwarded-Proto` are added. `X-Forwarded-Host`/`X-Forwarded-Proto` sent by the client are discarded, and the client address is appended to any existing `X-Forwarded-For` (earlier entries are client-controlled).
 - The upstream response is streamed back as is, including chunked bodies. The client connection is closed after each proxied response.
 - An unreachable upstream returns `502 Bad Gateway`, and a response that does not arrive within the timeout (third argument, default `30000` ms) returns `504 Gateway Timeout`.
 - Only `http://` upstreams are supported.
