@@ -1301,7 +1301,9 @@ inline request_read_result read_request_from_socket(int s) {
   ssize_t rret;
 
   while (true) {
-    while ((rret = recv(s, buf + buflen, (int) (sizeof(buf) - buflen), MSG_NOSIGNAL)) == -1 && errno == EINTR);
+    // Peek so bytes belonging to a following request stay in the socket.
+    // The event loop can then observe them without per-connection buffering.
+    while ((rret = recv(s, buf + buflen, (int) (sizeof(buf) - buflen), MSG_PEEK)) == -1 && errno == EINTR);
     if (rret <= 0) {
       return make_request_read_error(0, "", "");
     }
@@ -1312,11 +1314,21 @@ inline request_read_result read_request_from_socket(int s) {
     pret = phr_parse_request(
         buf, buflen, &method, &method_len, &path, &path_len,
         &minor_version, headers, &num_headers, prevbuflen);
-    if (pret > 0) {
-      break;
-    }
     if (pret == -1) {
       return make_request_read_error(400, "Bad Request", "Invalid Request");
+    }
+    auto consume_until = pret > 0 ? (size_t) pret : buflen;
+    auto consumed = prevbuflen;
+    while (consumed < consume_until) {
+      while ((rret = recv(s, buf + consumed, (int) (consume_until - consumed), MSG_NOSIGNAL)) == -1 && errno == EINTR);
+      if (rret <= 0) {
+        return make_request_read_error(0, "", "");
+      }
+      consumed += (size_t) rret;
+    }
+    if (pret > 0) {
+      buflen = (size_t) pret;
+      break;
     }
     if (buflen == sizeof(buf)) {
       return make_request_read_error(413, "Payload Too Large", "Request Too Large");
