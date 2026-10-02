@@ -69,6 +69,17 @@ typedef int sockopt_t;
 namespace clask {
 
 constexpr int keep_alive_timeout_ms = 5000;
+// Requests with a larger Content-Length are rejected with 413 before the body
+// is read, so a single client cannot make the server buffer unbounded memory.
+// Use server_t::max_body_size(0) to opt out of the limit.
+constexpr size_t default_max_body_size = 16 * 1024 * 1024;
+// An error response can be sent while the request body is still unread. Closing
+// a socket that has unread data makes Linux discard it and send RST, which can
+// hide the response from the client, so the remaining input is flushed first.
+// The budget is bounded in both time and bytes because the body may be
+// arbitrarily large, or may never finish arriving.
+constexpr int lingering_close_timeout_ms = 1000;
+constexpr size_t lingering_close_max_bytes = 256 * 1024;
 constexpr size_t accept_queue_factor = 64;
 constexpr unsigned int default_worker_count = 4;
 
@@ -199,6 +210,7 @@ struct server_runtime_config {
   unsigned int worker_count;
   size_t accept_queue_limit;
   int socket_timeout_ms;
+  size_t max_body_size;
 };
 
 struct listen_address {
@@ -334,6 +346,30 @@ inline socket_wait_result wait_socket_events(
   }
 #endif
   return result;
+}
+
+// Send the FIN, then read and discard whatever the peer is still sending, so
+// that closing the socket does not turn the already written response into a RST.
+inline void lingering_close(int s, int timeout_ms) {
+  shutdown(s, SHUT_WR);
+  const auto budget = timeout_ms > 0 && timeout_ms < lingering_close_timeout_ms
+      ? timeout_ms
+      : lingering_close_timeout_ms;
+  // Without this the socket timeout of the connection would apply to each recv.
+  set_socket_timeout(s, SO_RCVTIMEO, budget);
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::milliseconds(budget);
+  char buf[4096];
+  size_t drained = 0;
+  while (drained < lingering_close_max_bytes
+      && std::chrono::steady_clock::now() < deadline) {
+    ssize_t rret;
+    while ((rret = recv(s, buf, sizeof(buf), 0)) == -1 && errno == EINTR);
+    // EOF, a reset, or the recv timeout: there is nothing left worth waiting for.
+    if (rret <= 0) break;
+    drained += (size_t) rret;
+  }
+  closesocket(s);
 }
 
 inline bool send_all(int s, const char* data, size_t size) {
@@ -508,7 +544,8 @@ inline size_t resolve_accept_queue_limit(
 inline server_runtime_config resolve_server_runtime_config(
     unsigned int configured_worker_count,
     size_t configured_accept_queue_limit,
-    int socket_timeout_ms) {
+    int socket_timeout_ms,
+    size_t max_body_size = default_max_body_size) {
   auto worker_count = resolve_worker_count(configured_worker_count);
   return server_runtime_config{
     .worker_count = worker_count,
@@ -516,6 +553,7 @@ inline server_runtime_config resolve_server_runtime_config(
         configured_accept_queue_limit,
         worker_count),
     .socket_timeout_ms = socket_timeout_ms,
+    .max_body_size = max_body_size,
   };
 }
 
@@ -1465,13 +1503,19 @@ inline std::optional<size_t> parse_content_length(const std::string& value) {
     if (parsed_len != value.size()) {
       return std::nullopt;
     }
+    // On 32bit targets size_t is narrower than unsigned long long. Truncating
+    // here would let a request declare one length and be framed with another.
+    if (parsed > static_cast<unsigned long long>(std::numeric_limits<size_t>::max())) {
+      return std::nullopt;
+    }
     return static_cast<size_t>(parsed);
   } catch (const std::exception&) {
     return std::nullopt;
   }
 }
 
-inline request_read_result read_request_from_socket(int s) {
+inline request_read_result read_request_from_socket(
+    int s, size_t max_body_size = default_max_body_size) {
   char buf[16384];
   const char *method, *path;
   int pret, minor_version;
@@ -1568,6 +1612,11 @@ inline request_read_result read_request_from_socket(int s) {
 
   if (connection_close) {
     keep_alive = false;
+  }
+
+  // Reject before reading so the body is never buffered in memory.
+  if (has_content_length && max_body_size > 0 && content_length > max_body_size) {
+    return make_request_read_error(413, "Payload Too Large", "Request Too Large");
   }
 
   if (has_content_length && buflen - pret < content_length) {
@@ -1720,14 +1769,15 @@ inline bool handle_connection_request(
     const std::string& remote,
     int socket_timeout_ms,
     MatchFn&& match_fn,
-    bool configure_timeout = true) {
+    bool configure_timeout = true,
+    size_t max_body_size = default_max_body_size) {
   if (configure_timeout && (!set_socket_timeout(s, SO_RCVTIMEO, socket_timeout_ms)
       || !set_socket_timeout(s, SO_SNDTIMEO, socket_timeout_ms))) {
     closesocket(s);
     return false;
   }
 
-  auto read_result = read_request_from_socket(s);
+  auto read_result = read_request_from_socket(s, max_body_size);
   if (!read_result.ok) {
 #ifndef CLASK_DISABLE_LOGS
     if (read_result.error_code == 400) {
@@ -1743,6 +1793,9 @@ inline bool handle_connection_request(
           read_result.error_reason,
           read_result.error_body,
           false);
+      // The body of the rejected request is still queued on the socket.
+      lingering_close(s, socket_timeout_ms);
+      return false;
     }
     closesocket(s);
     return false;
@@ -1777,6 +1830,7 @@ private:
   unsigned int worker_count_;
   size_t accept_queue_limit_;
   int socket_timeout_ms_;
+  size_t max_body_size_;
   node& route_tree(route_method);
   const node& route_tree(route_method) const;
   template <typename Functor>
@@ -1810,10 +1864,12 @@ void QUERY(const std::string&, const functor_ ## name);
   server_t&& accept_queue_limit(size_t) &&;
   server_t& socket_timeout(int) &;
   server_t&& socket_timeout(int) &&;
+  server_t& max_body_size(size_t) &;
+  server_t&& max_body_size(size_t) &&;
   void run(const std::string&);
   void run(int);
   logger log;
-  server_t() : get_routes_{}, post_routes_{}, query_routes_{}, worker_count_{0}, accept_queue_limit_{0}, socket_timeout_ms_{keep_alive_timeout_ms} {}
+  server_t() : get_routes_{}, post_routes_{}, query_routes_{}, worker_count_{0}, accept_queue_limit_{0}, socket_timeout_ms_{keep_alive_timeout_ms}, max_body_size_{default_max_body_size} {}
 #ifdef CLASK_TEST
   bool test_match(const std::string&, const std::string&, const std::function<void(const func_t& fn, const std::vector<std::string>&)>&) const;
 #endif
@@ -1981,7 +2037,7 @@ inline bool server_t::handle_connection_socket(
           return false;
         }
         return match(*parsed_method, path, fn);
-      }, false);
+      }, false, config.max_body_size);
 }
 
 #ifdef CLASK_TEST
@@ -2513,6 +2569,16 @@ inline void server_t::reverse_proxy(
   }
 }
 
+inline server_t& server_t::max_body_size(size_t v) & {
+  max_body_size_ = v;
+  return *this;
+}
+
+inline server_t&& server_t::max_body_size(size_t v) && {
+  max_body_size_ = v;
+  return std::move(*this);
+}
+
 inline void server_t::_run(const std::string& host, int port = 8080) {
   initialize_network_runtime();
   prepare_handler_trees(get_routes_, post_routes_);
@@ -2521,7 +2587,8 @@ inline void server_t::_run(const std::string& host, int port = 8080) {
   auto config = resolve_server_runtime_config(
       worker_count_,
       accept_queue_limit_,
-      socket_timeout_ms_);
+      socket_timeout_ms_,
+      max_body_size_);
   server_runtime_state runtime;
 
   run_server_event_loop(

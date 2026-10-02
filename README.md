@@ -15,7 +15,8 @@ int main() {
   auto s = clask::server()
     .worker_count(32)
     .accept_queue_limit(4096)
-    .socket_timeout(3000);
+    .socket_timeout(3000)
+    .max_body_size(16 * 1024 * 1024);
   s.GET("/", [](clask::request& req) {
     return "OK!";
   });
@@ -52,12 +53,20 @@ s.run();
 auto s = clask::server()
   .worker_count(32)
   .accept_queue_limit(4096)
-  .socket_timeout(3000);
+  .socket_timeout(3000)
+  .max_body_size(16 * 1024 * 1024);
 ```
 
 - `worker_count(n)` sets the number of worker threads.
 - `accept_queue_limit(n)` caps queued accepted sockets before returning `503 Service Unavailable`.
 - `socket_timeout(ms)` sets socket send/receive timeout in milliseconds.
+- `max_body_size(n)` caps the request body in bytes. A request declaring a larger
+  `Content-Length` is answered with `413 Payload Too Large` before any of the body is
+  buffered, so a client cannot make the server buffer unbounded memory. `0` disables
+  the limit. The rejected body is then read and discarded with a bounded budget
+  (1 second, 256 KiB) before the socket is closed, because closing a socket that
+  still has unread data makes the kernel send `RST` and the client would lose the
+  response that was just written.
 
 The current worker-pool runtime supports HTTP keep-alive by routing only readable sockets to workers. Idle keep-alive connections stay in the event loop instead of occupying one worker thread each.
 
@@ -66,6 +75,7 @@ Reasonable defaults are used when these values are left unset:
 - `worker_count()` defaults to roughly `2 * hardware_concurrency()`, with a fallback of `4`.
 - `accept_queue_limit()` defaults to `worker_count * 64`.
 - `socket_timeout()` defaults to `5000` milliseconds.
+- `max_body_size()` defaults to `16 MiB`.
 
 ## Runtime Notes
 
