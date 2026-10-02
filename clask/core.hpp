@@ -73,6 +73,13 @@ constexpr int keep_alive_timeout_ms = 5000;
 // is read, so a single client cannot make the server buffer unbounded memory.
 // Use server_t::max_body_size(0) to opt out of the limit.
 constexpr size_t default_max_body_size = 16 * 1024 * 1024;
+// An error response can be sent while the request body is still unread. Closing
+// a socket that has unread data makes Linux discard it and send RST, which can
+// hide the response from the client, so the remaining input is flushed first.
+// The budget is bounded in both time and bytes because the body may be
+// arbitrarily large, or may never finish arriving.
+constexpr int lingering_close_timeout_ms = 1000;
+constexpr size_t lingering_close_max_bytes = 256 * 1024;
 constexpr size_t accept_queue_factor = 64;
 constexpr unsigned int default_worker_count = 4;
 
@@ -339,6 +346,30 @@ inline socket_wait_result wait_socket_events(
   }
 #endif
   return result;
+}
+
+// Send the FIN, then read and discard whatever the peer is still sending, so
+// that closing the socket does not turn the already written response into a RST.
+inline void lingering_close(int s, int timeout_ms) {
+  shutdown(s, SHUT_WR);
+  const auto budget = timeout_ms > 0 && timeout_ms < lingering_close_timeout_ms
+      ? timeout_ms
+      : lingering_close_timeout_ms;
+  // Without this the socket timeout of the connection would apply to each recv.
+  set_socket_timeout(s, SO_RCVTIMEO, budget);
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::milliseconds(budget);
+  char buf[4096];
+  size_t drained = 0;
+  while (drained < lingering_close_max_bytes
+      && std::chrono::steady_clock::now() < deadline) {
+    ssize_t rret;
+    while ((rret = recv(s, buf, sizeof(buf), 0)) == -1 && errno == EINTR);
+    // EOF, a reset, or the recv timeout: there is nothing left worth waiting for.
+    if (rret <= 0) break;
+    drained += (size_t) rret;
+  }
+  closesocket(s);
 }
 
 inline bool send_all(int s, const char* data, size_t size) {
@@ -1762,6 +1793,9 @@ inline bool handle_connection_request(
           read_result.error_reason,
           read_result.error_body,
           false);
+      // The body of the rejected request is still queued on the socket.
+      lingering_close(s, socket_timeout_ms);
+      return false;
     }
     closesocket(s);
     return false;

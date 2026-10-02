@@ -1456,6 +1456,76 @@ void test_clask_accepted_socket_timeouts() {
   closesocket(listener);
 }
 
+
+// Rejecting a request leaves its body unread. Closing such a socket makes Linux
+// discard the queued data and send RST, which cost the client the response that
+// was just written, so the error paths flush the input with a bounded budget.
+void test_clask_error_response_lingering_close() {
+  clask::initialize_network_runtime();
+  int listener = clask::create_listening_socket("127.0.0.1", 0);
+  sockaddr_in address{};
+  socklen_t size = sizeof(address);
+  _ok(getsockname(listener, (sockaddr*) &address, &size) == 0, "get listener address");
+  int client = (int) socket(AF_INET, SOCK_STREAM, 0);
+  if (connect(client, (sockaddr*) &address, size) != 0) {
+    _ok(false, "connect test client");
+    closesocket(client);
+    closesocket(listener);
+    return;
+  }
+
+  // Headers plus the start of a body that is far over the limit, in one burst.
+  const std::string wire =
+      "POST / HTTP/1.1\r\n"
+      "Host: localhost\r\n"
+      "Content-Length: 1048576\r\n"
+      "\r\n" + std::string(128 * 1024, 'x');
+  _ok(socket_write(client, wire.data(), wire.size()) == (ssize_t) wire.size(),
+      "send oversized request");
+  // Give the kernel time to queue the body, so the close really has unread data.
+  std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
+  clask::server_runtime_state runtime;
+  clask::accept_ready_connection(listener, 4, runtime, 1000);
+  if (runtime.ready_queue.empty()) {
+    _ok(false, "accepted socket is queued");
+    closesocket(client);
+    closesocket(listener);
+    return;
+  }
+  int fd = runtime.ready_queue.front().fd;
+  clask::func_t handler{};
+  handler.f_string = [](clask::request&) { return "ok"; };
+  auto keep_alive = clask::handle_connection_request(fd, "test", 200,
+      [&](const std::string&, const std::string&, const auto& callback) {
+        callback(handler, {});
+        return true;
+      }, false, 1024);
+  _ok(keep_alive == false, "oversized request closes the connection");
+
+  std::string got;
+  bool clean_eof = false;
+  char buf[4096];
+  while (true) {
+    auto n = recv(client, buf, sizeof(buf), 0);
+    if (n > 0) {
+      got.append(buf, (size_t) n);
+      continue;
+    }
+    clean_eof = n == 0;
+    break;
+  }
+  _ok(got.compare(0, 12, "HTTP/1.1 413") == 0, "client receives the 413 response");
+#ifndef _WIN32
+  _ok(clean_eof, "connection ends with FIN instead of RST");
+#else
+  (void) clean_eof;
+#endif
+
+  closesocket(client);
+  closesocket(listener);
+}
+
 void test_clask_ready_connection_batch() {
   clask::server_runtime_state runtime;
   runtime.idle_connections.emplace(10, clask::connection_state{10, "first"});
@@ -1929,6 +1999,7 @@ int main() {
   subtest("test_clask_server_runtime_helpers", test_clask_server_runtime_helpers);
   subtest("test_clask_worker_completion_wakeup", test_clask_worker_completion_wakeup);
   subtest("test_clask_accepted_socket_timeouts", test_clask_accepted_socket_timeouts);
+  subtest("test_clask_error_response_lingering_close", test_clask_error_response_lingering_close);
   subtest("test_clask_ready_connection_batch", test_clask_ready_connection_batch);
   subtest("test_clask_fluent_server_setup", test_clask_fluent_server_setup);
   subtest("test_clask_static_path_resolution", test_clask_static_path_resolution);

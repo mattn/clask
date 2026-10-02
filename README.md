@@ -62,8 +62,11 @@ auto s = clask::server()
 - `socket_timeout(ms)` sets socket send/receive timeout in milliseconds.
 - `max_body_size(n)` caps the request body in bytes. A request declaring a larger
   `Content-Length` is answered with `413 Payload Too Large` before any of the body is
-  read, so a client cannot make the server buffer unbounded memory. `0` disables the
-  limit.
+  buffered, so a client cannot make the server buffer unbounded memory. `0` disables
+  the limit. The rejected body is then read and discarded with a bounded budget
+  (1 second, 256 KiB) before the socket is closed, because closing a socket that
+  still has unread data makes the kernel send `RST` and the client would lose the
+  response that was just written.
 
 The current worker-pool runtime supports HTTP keep-alive by routing only readable sockets to workers. Idle keep-alive connections stay in the event loop instead of occupying one worker thread each.
 
