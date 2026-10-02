@@ -882,6 +882,85 @@ void test_clask_read_request_content_length_bounds_body() {
   closesocket(fds[1]);
 }
 
+
+void test_clask_read_request_body_limit() {
+  // A declared body larger than the limit is rejected before it is buffered.
+  {
+    int fds[2];
+    _ok(make_socket_pair(fds) == true, R"(make_socket_pair(fds) == true)");
+    const std::string request =
+        "POST / HTTP/1.1\r\n"
+        "Host: localhost\r\n"
+        "Content-Length: 1048576\r\n"
+        "\r\n";
+    auto written = socket_write(fds[0], request.data(), request.size());
+    _ok(written == (ssize_t) request.size(), R"(written == (ssize_t) request.size())");
+
+    // No body is sent at all: the limit must be enforced from the header only.
+    auto result = clask::read_request_from_socket(fds[1], 1024);
+    _ok(result.ok == false, R"(result.ok == false)");
+    _ok(result.error_code == 413, R"(result.error_code == 413)");
+
+    closesocket(fds[0]);
+    closesocket(fds[1]);
+  }
+
+  // A body at the limit is still accepted.
+  {
+    int fds[2];
+    _ok(make_socket_pair(fds) == true, R"(make_socket_pair(fds) == true)");
+    const std::string request =
+        "POST / HTTP/1.1\r\n"
+        "Host: localhost\r\n"
+        "Content-Length: 4\r\n"
+        "\r\n"
+        "abcd";
+    auto written = socket_write(fds[0], request.data(), request.size());
+    _ok(written == (ssize_t) request.size(), R"(written == (ssize_t) request.size())");
+    shutdown(fds[0], SHUT_WR);
+
+    auto result = clask::read_request_from_socket(fds[1], 4);
+    _ok(result.ok == true, R"(result.ok == true)");
+    _ok(result.req.has_value() && result.req->body == "abcd", R"(result.req->body == "abcd")");
+
+    closesocket(fds[0]);
+    closesocket(fds[1]);
+  }
+
+  // Zero disables the limit.
+  {
+    int fds[2];
+    _ok(make_socket_pair(fds) == true, R"(make_socket_pair(fds) == true)");
+    const std::string request =
+        "POST / HTTP/1.1\r\n"
+        "Host: localhost\r\n"
+        "Content-Length: 5\r\n"
+        "\r\n"
+        "hello";
+    auto written = socket_write(fds[0], request.data(), request.size());
+    _ok(written == (ssize_t) request.size(), R"(written == (ssize_t) request.size())");
+    shutdown(fds[0], SHUT_WR);
+
+    auto result = clask::read_request_from_socket(fds[1], 0);
+    _ok(result.ok == true, R"(result.ok == true)");
+    _ok(result.req.has_value() && result.req->body == "hello", R"(result.req->body == "hello")");
+
+    closesocket(fds[0]);
+    closesocket(fds[1]);
+  }
+}
+
+void test_clask_content_length_out_of_range() {
+  // 2**64 - 1 fits, 2**64 does not and must not wrap around.
+  _ok(clask::parse_content_length("18446744073709551615").has_value() ==
+          (sizeof(size_t) == sizeof(unsigned long long)),
+      R"(SIZE_MAX is accepted only when size_t is 64bit)");
+  _ok(clask::parse_content_length("18446744073709551616").has_value() == false,
+      R"(values above unsigned long long are rejected)");
+  _ok(clask::parse_content_length("99999999999999999999999").has_value() == false,
+      R"(absurd values are rejected)");
+}
+
 static std::string serve_file_with_header(
     const std::string& path,
     const std::string& if_modified_since,
@@ -1830,6 +1909,8 @@ int main() {
   subtest("test_clask_read_request_transfer_encoding", test_clask_read_request_transfer_encoding);
   subtest("test_clask_read_request_conflicting_content_length", test_clask_read_request_conflicting_content_length);
   subtest("test_clask_read_request_content_length_bounds_body", test_clask_read_request_content_length_bounds_body);
+  subtest("test_clask_read_request_body_limit", test_clask_read_request_body_limit);
+  subtest("test_clask_content_length_out_of_range", test_clask_content_length_out_of_range);
   subtest("test_clask_pipelined_requests", test_clask_pipelined_requests);
   subtest("test_clask_serve_file_if_modified_since", test_clask_serve_file_if_modified_since);
   subtest("test_clask_serve_file_csv_content_type", test_clask_serve_file_csv_content_type);
